@@ -3,8 +3,7 @@ REM =========================================================
 REM BUILD.BAT — Compilation 32 bits (386+, modele flat)
 REM =========================================================
 REM Necessite Open Watcom 1.9 avec wcc386/wlink dans le PATH,
-REM et DOS32A.EXE + STUB32A.EXE accessibles depuis LINK.RSP
-REM (voir PORTAGE_32BITS.md pour la mise en place de DOS/32A).
+REM et DOS32A.EXE + STUB32A.EXE accessibles depuis LINK.RSP.
 REM
 REM -3s  = instructions 386, convention d'appel "stack"
 REM        (plus sure a marier avec les gestionnaires
