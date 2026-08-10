@@ -1,0 +1,4 @@
+*.pal binary
+*.raw binary
+*.psf binary
+*.psf.gz binary
