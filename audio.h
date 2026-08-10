@@ -72,18 +72,7 @@
 #define AUD_ERR_FILE    3   /* fichier introuvable/inaccessible    */
 #define AUD_ERR_FORMAT  4   /* fichier présent mais invalide/tronqué */
 
-/* Fréquence de mixage du moteur : 22050 Hz sur demande explicite.
-   ATTENTION — c'est le double de 11025 Hz (déjà responsable du
-   ralentissement initial) et quatre fois les 5512 Hz utilisés
-   entre-temps pour alléger la charge CPU : deux fois plus
-   d'échantillons à mixer par seconde, donc environ deux fois
-   plus de CPU consommé par audioUpdate() pour le même contenu.
-   Si un ralentissement réapparaît (notamment sur les scènes les
-   plus lourdes en calcul comme le plasma), c'est directement le
-   prix de cette qualité audio plus élevée — pas une régression :
-   le seul moyen de le compenser sans revenir sur ce taux serait
-   de réduire le nombre de voies simultanées ou de porter le
-   mixage en assembleur. */
+/* Fréquence de mixage du moteur : 22050 Hz */
 #define MIX_RATE  22050UL
 
 /* ---------------------------------------------------------
