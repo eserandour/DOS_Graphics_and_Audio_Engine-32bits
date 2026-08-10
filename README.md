@@ -49,7 +49,7 @@ Accès direct au matériel PC (VRAM, PIT, clavier, DMA/DSP), sans dépendance à
 ## Structure du dépôt
 
 ```
-DOS_Graphics_and_Audio_Engine-32bit/
+DOS_Graphics_and_Audio_Engine_32bits/
 ├── main.c              Point d'entrée, boucle principale, arrêt propre
 ├── app.h                Flags globaux (quitRequested)
 │
