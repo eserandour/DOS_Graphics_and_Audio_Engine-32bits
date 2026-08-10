@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Font Editor — f1_.c [8x8]</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap');
+
+  :root {
+    --bg:        #0d0d0f;
+    --panel:     #131316;
+    --border:    #222228;
+    --border2:   #2e2e3a;
+    --on:        #ffffff;
+    --off:       #1a1a22;
+    --hover-on:  #ccccdd;
+    --hover-off: #2a2a38;
+    --sel:       #3d5aff;
+    --sel-light: #6a80ff;
+    --green:     #3ddc84;
+    --green-d:   #1a5c38;
+    --yellow:    #ffd060;
+    --red:       #ff5555;
+    --dim:       #555566;
+    --text:      #ccccdd;
+    --text2:     #888899;
+    --btn:       #1e1e28;
+    --btn-h:     #282838;
+    --mono:      'IBM Plex Mono', monospace;
+    --display:   'Space Mono', monospace;
+    --gap:       3px;
+    --cell:      44px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ─────────────────────────────────────────── */
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-family: var(--display);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--on);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+  header h1 span { color: var(--sel-light); }
+  .header-sub { color: var(--dim); font-size: 12px; flex: 1; }
+
+  /* ── Onglets de mode — en haut à droite ──────────────── */
+  .mode-tabs {
+    display: flex;
+    gap: 0;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 3px;
+    margin-left: auto;
+  }
+  .mode-tab {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 16px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    background: transparent;
+    color: var(--dim);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  .mode-tab.active {
+    background: var(--sel);
+    color: #fff;
+  }
+  .mode-tab:not(.active):hover {
+    background: var(--btn-h);
+    color: var(--text);
+  }
+
+  /* ── Layout ──────────────────────────────────────────── */
+  .workspace {
+    display: grid;
+    grid-template-columns: auto 1fr 300px;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .panel:last-child { border-right: none; }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  /* ── Grille d'édition ────────────────────────────────── */
+  #grid-wrap { display: flex; flex-direction: column; align-items: flex-start; }
+  .grid-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .char-badge {
+    font-family: var(--display);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--on);
+    width: 36px;
+    text-align: center;
+  }
+  .char-info { color: var(--dim); font-size: 11px; }
+
+  #col-labels { display: flex; margin-bottom: 3px; }
+  #col-labels .col-lbl-spacer { width: 22px; flex-shrink: 0; }
+  #col-labels span {
+    text-align: center;
+    font-size: 10px;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+
+  .grid-row { display: flex; align-items: center; margin-bottom: var(--gap); }
+  .row-label {
+    width: 18px;
+    font-size: 10px;
+    color: var(--dim);
+    text-align: right;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  .cell {
+    height: var(--cell);
+    width: var(--cell);
+    margin-right: var(--gap);
+    border-radius: 4px;
+    cursor: crosshair;
+    transition: background 0.06s;
+    flex-shrink: 0;
+    background: var(--off);
+  }
+  body.mode-8x16 .cell  { --cell: 40px; height: 28px; border-radius: 3px; }
+  body.mode-16x16 .cell { --cell: 24px; border-radius: 2px; }
+
+  .cell.on { background: var(--on); }
+  .cell:hover { opacity: 0.85; }
+  .cell.on:hover { background: var(--hover-on); }
+  .cell:not(.on):hover { background: var(--hover-off); }
+
+  /* ── Boutons outils ──────────────────────────────────── */
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn {
+    background: var(--btn);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 11px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--btn-h); border-color: var(--dim); }
+  .btn.danger { border-color: #442222; color: var(--red); }
+  .btn.danger:hover { background: #2a1010; }
+  .btn.primary { background: var(--sel); border-color: var(--sel-light); color: #fff; }
+  .btn.primary:hover { background: var(--sel-light); }
+  .btn.success { border-color: var(--green-d); color: var(--green); }
+  .btn.success:hover { background: #112211; }
+  .btn.accent { border-color: #5a3a8a; color: #c080ff; }
+  .btn.accent:hover { background: #1a0a2a; }
+
+  /* ── Sélecteur de caractères ─────────────────────────── */
+  #char-grid {
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 3px;
+  }
+  .char-cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    background: #161620;
+    border: 1px solid transparent;
+    transition: all 0.1s;
+    color: var(--dim);
+  }
+  .char-cell:hover { background: #1e1e30; border-color: var(--border2); color: var(--text); }
+  .char-cell.active { background: var(--sel); color: #fff; border-color: var(--sel-light); }
+  .char-cell.has-data { border-color: var(--green-d); color: var(--green); }
+  .char-cell.active.has-data { border-color: var(--sel-light); }
+
+  /* ── Bytes display ───────────────────────────────────── */
+  .byte-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .byte-row:last-child { border-bottom: none; }
+  .byte-idx { color: var(--dim); width: 22px; font-size: 11px; flex-shrink:0; }
+  .byte-hex { color: var(--yellow); font-size: 12px; font-weight: 600; flex-shrink:0; }
+  .byte-bits { display: flex; gap: 2px; }
+  .bit {
+    width: 11px; height: 11px;
+    border-radius: 2px;
+    background: var(--off);
+    border: 1px solid var(--border2);
+    flex-shrink:0;
+  }
+  .bit.on { background: var(--on); border-color: var(--on); }
+
+  /* ── Aperçu ──────────────────────────────────────────── */
+  #preview-wrap {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .preview-item { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+  .preview-item canvas {
+    image-rendering: pixelated;
+    background: #000;
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+  }
+  .preview-item span { font-size: 10px; color: var(--dim); }
+
+  /* ── Aperçu chaîne ───────────────────────────────────── */
+  #string-preview-wrap {
+    background: #000;
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 10px;
+    overflow-x: auto;
+  }
+  #string-preview { image-rendering: pixelated; display: block; }
+  #preview-input {
+    background: var(--btn);
+    border: 1px solid var(--border2);
+    border-radius: 5px;
+    color: var(--on);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 10px;
+    width: 100%;
+    margin-top: 8px;
+    outline: none;
+  }
+  #preview-input:focus { border-color: var(--sel); }
+
+  /* ── Code C ──────────────────────────────────────────── */
+  #code-output {
+    background: #080810;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 11px;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+    max-height: 320px;
+    overflow-y: auto;
+    color: #a0a0c0;
+    flex: 1;
+  }
+  .code-kw  { color: #569cd6; }
+  .code-fn  { color: #dcdcaa; }
+  .code-num { color: #b5cea8; }
+  .code-str { color: #ce9178; }
+  .code-cm  { color: #6a9955; }
+
+  /* ── Status bar ──────────────────────────────────────── */
+  #status {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 5px 18px;
+    font-size: 11px;
+    color: var(--dim);
+    display: flex;
+    justify-content: space-between;
+  }
+  #status-msg { color: var(--green); }
+
+  /* ── Import/export area ──────────────────────────────── */
+  #json-io {
+    background: #080810;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--dim);
+    resize: vertical;
+    width: 100%;
+    height: 80px;
+    outline: none;
+  }
+  #json-io:focus { border-color: var(--sel); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  #left-panel { min-width: 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FONT EDITOR <span>//</span></h1>
+  <div class="header-sub">Éditeur de polices bitmap — Open Watcom / DOS</div>
+  <!-- Onglets 8×8 / 8×16 / 16×16 en haut à droite -->
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tab-8x8"   onclick="setMode('8x8')">8×8</button>
+    <button class="mode-tab"        id="tab-8x16"  onclick="setMode('8x16')">8×16</button>
+    <button class="mode-tab"        id="tab-16x16" onclick="setMode('16x16')">16×16</button>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ══ PANNEAU GAUCHE : éditeur ═════════════════════════ -->
+  <div class="panel" id="left-panel">
+
+    <!-- Grille -->
+    <div id="grid-wrap">
+      <div class="grid-header">
+        <div class="char-badge" id="char-badge">A</div>
+        <div>
+          <div style="color:var(--on);font-weight:600" id="char-name">Majuscule 'A'</div>
+          <div class="char-info" id="char-code">CP850 0x41 — index 65</div>
+        </div>
+      </div>
+      <div id="col-labels"></div>
+      <div id="grid"></div>
+    </div>
+
+    <!-- Outils -->
+    <div>
+      <div class="section-label">Transformations</div>
+      <div class="btn-row">
+        <button class="btn" onclick="shiftUp()">↑ Haut</button>
+        <button class="btn" onclick="shiftDown()">↓ Bas</button>
+        <button class="btn" onclick="shiftLeft()">← Gauche</button>
+        <button class="btn" onclick="shiftRight()">→ Droite</button>
+        <button class="btn" onclick="flipH()">⇔ Miroir H</button>
+        <button class="btn" onclick="flipV()">⇕ Miroir V</button>
+        <button class="btn" onclick="invert()">⊕ Inverser</button>
+        <button class="btn danger" onclick="clearGlyph()">✕ Effacer</button>
+      </div>
+    </div>
+
+    <!-- Sélecteur de caractères -->
+    <div>
+      <div class="section-label">Caractères — vert = défini · bleu = actif</div>
+      <div style="display:flex;gap:4px;margin-bottom:8px">
+        <button class="mode-tab active" id="btn-page0" onclick="setCharPage(0)">0–127 · ASCII</button>
+        <button class="mode-tab"        id="btn-page1" onclick="setCharPage(1)">128–255 · CP850</button>
+      </div>
+      <div id="char-grid"></div>
+    </div>
+
+  </div>
+
+  <!-- ══ PANNEAU CENTRE : aperçu + bytes ══════════════════ -->
+  <div class="panel">
+
+    <!-- Aperçu multi-échelle -->
+    <div>
+      <div class="section-label">Aperçu glyphe</div>
+      <div id="preview-wrap">
+        <div class="preview-item">
+          <canvas id="prev1"></canvas>
+          <span>×1</span>
+        </div>
+        <div class="preview-item">
+          <canvas id="prev2"></canvas>
+          <span>×2</span>
+        </div>
+        <div class="preview-item">
+          <canvas id="prev4"></canvas>
+          <span>×4</span>
+        </div>
+        <div class="preview-item">
+          <canvas id="prev6"></canvas>
+          <span>×6</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Aperçu chaîne -->
+    <div>
+      <div class="section-label">Aperçu chaîne</div>
+      <div id="string-preview-wrap">
+        <canvas id="string-preview"></canvas>
+        <input id="preview-input" type="text" value="ABCDEFGH"
+               placeholder="Tapez du texte..."
+               oninput="updateStringPreview()">
+      </div>
+    </div>
+
+    <!-- Bytes -->
+    <div>
+      <div class="section-label">Octets (ligne par ligne)</div>
+      <div id="bytes-display"></div>
+    </div>
+
+    <!-- Saisie hex -->
+    <div>
+      <div class="section-label">Saisie hexadécimale directe</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input id="hex-input" placeholder="Valeurs hex séparées par virgule/espace"
+          style="background:var(--btn);border:1px solid var(--border2);border-radius:5px;color:var(--on);font-family:var(--mono);font-size:12px;padding:5px 10px;flex:1;outline:none"
+          onkeydown="if(event.key==='Enter')applyHex()">
+        <button class="btn primary" onclick="applyHex()">Appliquer</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ PANNEAU DROIT : export / import ══════════════════ -->
+  <div class="panel">
+
+    <!-- Export C -->
+    <div style="display:flex;flex-direction:column;gap:10px;flex:1">
+      <div class="section-label">Code C généré (format f1_.c)</div>
+      <div class="btn-row">
+        <button class="btn" id="btn-export-all"     onclick="exportC()">📋 Tout</button>
+        <button class="btn" id="btn-export-glyph"   onclick="exportGlyph()">📋 Glyphe actif</button>
+        <button class="btn" id="btn-export-defined" onclick="exportDefined()">📋 Définis seul.</button>
+      </div>
+      <div id="code-output"></div>
+    </div>
+
+    <!-- Export PNG -->
+    <div>
+      <div class="section-label">Export PNG</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+        <label style="font-size:11px;color:var(--text2)">Échelle :</label>
+        <select id="png-export-scale" style="background:var(--btn);border:1px solid var(--border2);border-radius:4px;color:var(--on);font-family:var(--mono);font-size:12px;padding:3px 8px;outline:none">
+          <option value="1">×1</option>
+          <option value="2" selected>×2</option>
+          <option value="4">×4</option>
+        </select>
+        <button class="btn accent" style="flex:1" onclick="exportFontPng()">🖼 PNG</button>
+      </div>
+    </div>
+
+    <!-- Sauvegarde JSON -->
+    <div>
+      <div class="section-label">Sauvegarde / Chargement JSON</div>
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn success" onclick="saveJSON()">💾 Exporter JSON</button>
+        <button class="btn" onclick="document.getElementById('file-input').click()">📂 Charger JSON</button>
+        <input id="file-input" type="file" accept=".json,.fnt" style="display:none" onchange="loadJSON(event)">
+      </div>
+      <textarea id="json-io" placeholder="JSON de la police (coller ici pour importer)..."></textarea>
+      <button class="btn" style="margin-top:6px;width:100%" onclick="importFromTextarea()">Importer depuis la zone ci-dessus</button>
+    </div>
+
+    <!-- Raccourcis -->
+    <div>
+      <div class="section-label">Raccourcis clavier</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;color:var(--text2)">
+        <tr><td style="padding:2px 0;color:var(--yellow)">←↑↓→</td><td>Changer de caractère</td></tr>
+        <tr><td style="color:var(--yellow)">W A S D</td><td>Décaler le glyphe</td></tr>
+        <tr><td style="color:var(--yellow)">H</td><td>Miroir horizontal</td></tr>
+        <tr><td style="color:var(--yellow)">V</td><td>Miroir vertical</td></tr>
+        <tr><td style="color:var(--yellow)">I</td><td>Inverser</td></tr>
+        <tr><td style="color:var(--yellow)">Del</td><td>Effacer le glyphe</td></tr>
+        <tr><td style="color:var(--yellow)">Ctrl+C</td><td>Copier glyphe C</td></tr>
+      </table>
+    </div>
+
+    <!-- Stats -->
+    <div>
+      <div class="section-label">Statistiques</div>
+      <div id="stats" style="font-size:11px;color:var(--text2);line-height:1.8"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="status">
+  <span id="status-msg">Prêt.</span>
+  <span id="status-right">Font Editor — 8×8</span>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// ÉTAT GLOBAL
+// ═══════════════════════════════════════════════════════════
+
+const CHARS = Array.from({length: 256}, (_, i) => String.fromCharCode(i));
+
+// Police 8x8 CP850 complète
+const DEFAULT_FONT8 = [
+  [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],[0x7e,0x81,0xa5,0x81,0xbd,0x99,0x81,0x7e],
+  [0x7e,0xff,0xdb,0xff,0xc3,0xe7,0xff,0x7e],[0x6c,0xfe,0xfe,0xfe,0x7c,0x38,0x10,0x00],
+  [0x10,0x38,0x7c,0xfe,0x7c,0x38,0x10,0x00],[0x38,0x7c,0x38,0xfe,0xfe,0xd6,0x10,0x38],
+  [0x10,0x38,0x7c,0xfe,0xfe,0x7c,0x10,0x38],[0x00,0x00,0x18,0x3c,0x3c,0x18,0x00,0x00],
+  [0xff,0xff,0xe7,0xc3,0xc3,0xe7,0xff,0xff],[0x00,0x3c,0x66,0x42,0x42,0x66,0x3c,0x00],
+  [0xff,0xc3,0x99,0xbd,0xbd,0x99,0xc3,0xff],[0x0f,0x07,0x0f,0x7d,0xcc,0xcc,0xcc,0x78],
+  [0x3c,0x66,0x66,0x66,0x3c,0x18,0x7e,0x18],[0x3f,0x33,0x3f,0x30,0x30,0x70,0xf0,0xe0],
+  [0x7f,0x63,0x7f,0x63,0x63,0x67,0xe6,0xc0],[0x18,0xdb,0x3c,0xe7,0xe7,0x3c,0xdb,0x18],
+  [0x80,0xe0,0xf8,0xfe,0xf8,0xe0,0x80,0x00],[0x02,0x0e,0x3e,0xfe,0x3e,0x0e,0x02,0x00],
+  [0x18,0x3c,0x7e,0x18,0x18,0x7e,0x3c,0x18],[0x66,0x66,0x66,0x66,0x66,0x00,0x66,0x00],
+  [0x7f,0xdb,0xdb,0x7b,0x1b,0x1b,0x1b,0x00],[0x3e,0x61,0x3c,0x66,0x66,0x3c,0x86,0x7c],
+  [0x00,0x00,0x00,0x00,0x7e,0x7e,0x7e,0x00],[0x18,0x3c,0x7e,0x18,0x7e,0x3c,0x18,0xff],
+  [0x18,0x3c,0x7e,0x18,0x18,0x18,0x18,0x00],[0x18,0x18,0x18,0x18,0x7e,0x3c,0x18,0x00],
+  [0x00,0x18,0x0c,0xfe,0x0c,0x18,0x00,0x00],[0x00,0x30,0x60,0xfe,0x60,0x30,0x00,0x00],
+  [0x00,0x00,0xc0,0xc0,0xc0,0xfe,0x00,0x00],[0x00,0x24,0x66,0xff,0x66,0x24,0x00,0x00],
+  [0x00,0x18,0x3c,0x7e,0xff,0xff,0x00,0x00],[0x00,0xff,0xff,0x7e,0x3c,0x18,0x00,0x00],
+  [0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],[0x18,0x3c,0x3c,0x18,0x18,0x00,0x18,0x00],
+  [0x66,0x66,0x24,0x00,0x00,0x00,0x00,0x00],[0x6c,0x6c,0xfe,0x6c,0xfe,0x6c,0x6c,0x00],
+  [0x18,0x3e,0x60,0x3c,0x06,0x7c,0x18,0x00],[0x00,0xc6,0xcc,0x18,0x30,0x66,0xc6,0x00],
+  [0x38,0x6c,0x38,0x76,0xdc,0xcc,0x76,0x00],[0x18,0x18,0x30,0x00,0x00,0x00,0x00,0x00],
+  [0x0c,0x18,0x30,0x30,0x30,0x18,0x0c,0x00],[0x30,0x18,0x0c,0x0c,0x0c,0x18,0x30,0x00],
+  [0x00,0x66,0x3c,0xff,0x3c,0x66,0x00,0x00],[0x00,0x18,0x18,0x7e,0x18,0x18,0x00,0x00],
+  [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x30],[0x00,0x00,0x00,0x7e,0x00,0x00,0x00,0x00],
+  [0x00,0x00,0x00,0x00,0x00,0x18,0x18,0x00],[0x06,0x0c,0x18,0x30,0x60,0xc0,0x80,0x00],
+  [0x38,0x6c,0xc6,0xd6,0xc6,0x6c,0x38,0x00],[0x18,0x38,0x18,0x18,0x18,0x18,0x7e,0x00],
+  [0x7c,0xc6,0x06,0x1c,0x30,0x66,0xfe,0x00],[0x7c,0xc6,0x06,0x3c,0x06,0xc6,0x7c,0x00],
+  [0x1c,0x3c,0x6c,0xcc,0xfe,0x0c,0x1e,0x00],[0xfe,0xc0,0xc0,0xfc,0x06,0xc6,0x7c,0x00],
+  [0x38,0x60,0xc0,0xfc,0xc6,0xc6,0x7c,0x00],[0xfe,0xc6,0x0c,0x18,0x30,0x30,0x30,0x00],
+  [0x7c,0xc6,0xc6,0x7c,0xc6,0xc6,0x7c,0x00],[0x7c,0xc6,0xc6,0x7e,0x06,0x0c,0x78,0x00],
+  [0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x00],[0x00,0x18,0x18,0x00,0x00,0x18,0x18,0x30],
+  [0x06,0x0c,0x18,0x30,0x18,0x0c,0x06,0x00],[0x00,0x00,0x7e,0x00,0x00,0x7e,0x00,0x00],
+  [0x60,0x30,0x18,0x0c,0x18,0x30,0x60,0x00],[0x7c,0xc6,0x0c,0x18,0x18,0x00,0x18,0x00],
+  [0x7c,0xc6,0xde,0xde,0xde,0xc0,0x78,0x00],[0x38,0x6c,0xc6,0xfe,0xc6,0xc6,0xc6,0x00],
+  [0xfc,0x66,0x66,0x7c,0x66,0x66,0xfc,0x00],[0x3c,0x66,0xc0,0xc0,0xc0,0x66,0x3c,0x00],
+  [0xf8,0x6c,0x66,0x66,0x66,0x6c,0xf8,0x00],[0xfe,0x62,0x68,0x78,0x68,0x62,0xfe,0x00],
+  [0xfe,0x62,0x68,0x78,0x68,0x60,0xf0,0x00],[0x3c,0x66,0xc0,0xc0,0xce,0x66,0x3a,0x00],
+  [0xc6,0xc6,0xc6,0xfe,0xc6,0xc6,0xc6,0x00],[0x3c,0x18,0x18,0x18,0x18,0x18,0x3c,0x00],
+  [0x1e,0x0c,0x0c,0x0c,0xcc,0xcc,0x78,0x00],[0xe6,0x66,0x6c,0x78,0x6c,0x66,0xe6,0x00],
+  [0xf0,0x60,0x60,0x60,0x62,0x66,0xfe,0x00],[0xc6,0xee,0xfe,0xfe,0xd6,0xc6,0xc6,0x00],
+  [0xc6,0xe6,0xf6,0xde,0xce,0xc6,0xc6,0x00],[0x7c,0xc6,0xc6,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0xfc,0x66,0x66,0x7c,0x60,0x60,0xf0,0x00],[0x7c,0xc6,0xc6,0xc6,0xc6,0xce,0x7c,0x0e],
+  [0xfc,0x66,0x66,0x7c,0x6c,0x66,0xe6,0x00],[0x3c,0x66,0x30,0x18,0x0c,0x66,0x3c,0x00],
+  [0x7e,0x7e,0x5a,0x18,0x18,0x18,0x3c,0x00],[0xc6,0xc6,0xc6,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0xc6,0xc6,0xc6,0xc6,0xc6,0x6c,0x38,0x00],[0xc6,0xc6,0xc6,0xd6,0xd6,0xfe,0x6c,0x00],
+  [0xc6,0xc6,0x6c,0x38,0x6c,0xc6,0xc6,0x00],[0x66,0x66,0x66,0x3c,0x18,0x18,0x3c,0x00],
+  [0xfe,0xc6,0x8c,0x18,0x32,0x66,0xfe,0x00],[0x3c,0x30,0x30,0x30,0x30,0x30,0x3c,0x00],
+  [0xc0,0x60,0x30,0x18,0x0c,0x06,0x02,0x00],[0x3c,0x0c,0x0c,0x0c,0x0c,0x0c,0x3c,0x00],
+  [0x10,0x38,0x6c,0xc6,0x00,0x00,0x00,0x00],[0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xff],
+  [0x30,0x18,0x0c,0x00,0x00,0x00,0x00,0x00],[0x00,0x00,0x78,0x0c,0x7c,0xcc,0x76,0x00],
+  [0xe0,0x60,0x7c,0x66,0x66,0x66,0xdc,0x00],[0x00,0x00,0x7c,0xc6,0xc0,0xc6,0x7c,0x00],
+  [0x1c,0x0c,0x7c,0xcc,0xcc,0xcc,0x76,0x00],[0x00,0x00,0x7c,0xc6,0xfe,0xc0,0x7c,0x00],
+  [0x3c,0x66,0x60,0xf8,0x60,0x60,0xf0,0x00],[0x00,0x00,0x76,0xcc,0xcc,0x7c,0x0c,0xf8],
+  [0xe0,0x60,0x6c,0x76,0x66,0x66,0xe6,0x00],[0x18,0x00,0x38,0x18,0x18,0x18,0x3c,0x00],
+  [0x06,0x00,0x06,0x06,0x06,0x66,0x66,0x3c],[0xe0,0x60,0x66,0x6c,0x78,0x6c,0xe6,0x00],
+  [0x38,0x18,0x18,0x18,0x18,0x18,0x3c,0x00],[0x00,0x00,0xec,0xfe,0xd6,0xd6,0xd6,0x00],
+  [0x00,0x00,0xdc,0x66,0x66,0x66,0x66,0x00],[0x00,0x00,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0x00,0x00,0xdc,0x66,0x66,0x7c,0x60,0xf0],[0x00,0x00,0x76,0xcc,0xcc,0x7c,0x0c,0x1e],
+  [0x00,0x00,0xdc,0x76,0x60,0x60,0xf0,0x00],[0x00,0x00,0x7e,0xc0,0x7c,0x06,0xfc,0x00],
+  [0x30,0x30,0xfc,0x30,0x30,0x36,0x1c,0x00],[0x00,0x00,0xcc,0xcc,0xcc,0xcc,0x76,0x00],
+  [0x00,0x00,0xc6,0xc6,0xc6,0x6c,0x38,0x00],[0x00,0x00,0xc6,0xd6,0xd6,0xfe,0x6c,0x00],
+  [0x00,0x00,0xc6,0x6c,0x38,0x6c,0xc6,0x00],[0x00,0x00,0xc6,0xc6,0xc6,0x7e,0x06,0xfc],
+  [0x00,0x00,0x7e,0x4c,0x18,0x32,0x7e,0x00],[0x0e,0x18,0x18,0x70,0x18,0x18,0x0e,0x00],
+  [0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x00],[0x70,0x18,0x18,0x0e,0x18,0x18,0x70,0x00],
+  [0x76,0xdc,0x00,0x00,0x00,0x00,0x00,0x00],[0x00,0x10,0x38,0x6c,0xc6,0xc6,0xfe,0x00],
+  // 0x80-0xFF CP850
+  [0x7c,0xc6,0xc0,0xc0,0xc6,0x7c,0x0c,0x78],[0xcc,0x00,0xcc,0xcc,0xcc,0xcc,0x76,0x00],
+  [0x0c,0x18,0x7c,0xc6,0xfe,0xc0,0x7c,0x00],[0x7c,0x82,0x78,0x0c,0x7c,0xcc,0x76,0x00],
+  [0xc6,0x00,0x78,0x0c,0x7c,0xcc,0x76,0x00],[0x30,0x18,0x78,0x0c,0x7c,0xcc,0x76,0x00],
+  [0x30,0x30,0x78,0x0c,0x7c,0xcc,0x76,0x00],[0x00,0x00,0x7e,0xc0,0xc0,0x7e,0x0c,0x38],
+  [0x7c,0x82,0x7c,0xc6,0xfe,0xc0,0x7c,0x00],[0xc6,0x00,0x7c,0xc6,0xfe,0xc0,0x7c,0x00],
+  [0x30,0x18,0x7c,0xc6,0xfe,0xc0,0x7c,0x00],[0x66,0x00,0x38,0x18,0x18,0x18,0x3c,0x00],
+  [0x7c,0x82,0x38,0x18,0x18,0x18,0x3c,0x00],[0x30,0x18,0x00,0x38,0x18,0x18,0x3c,0x00],
+  [0xc6,0x38,0x6c,0xc6,0xfe,0xc6,0xc6,0x00],[0x38,0x6c,0x7c,0xc6,0xfe,0xc6,0xc6,0x00],
+  [0x18,0x30,0xfe,0xc0,0xf8,0xc0,0xfe,0x00],[0x00,0x00,0x7e,0x12,0xfe,0x90,0xfe,0x00],
+  [0x3e,0x6c,0xcc,0xfe,0xcc,0xcc,0xce,0x00],[0x7c,0x82,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0xc6,0x00,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],[0x30,0x18,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0x78,0x84,0x00,0xcc,0xcc,0xcc,0x76,0x00],[0x60,0x30,0xcc,0xcc,0xcc,0xcc,0x76,0x00],
+  [0xc6,0x00,0xc6,0xc6,0xc6,0x7e,0x06,0xfc],[0xc6,0x38,0x6c,0xc6,0xc6,0x6c,0x38,0x00],
+  [0xc6,0x00,0xc6,0xc6,0xc6,0xc6,0x7c,0x00],[0x00,0x02,0x7c,0xce,0xd6,0xe6,0x7c,0x80],
+  [0x38,0x6c,0x64,0xf0,0x60,0x66,0xfc,0x00],[0x3a,0x6c,0xce,0xd6,0xe6,0x6c,0xb8,0x00],
+  [0x00,0xc6,0x6c,0x38,0x6c,0xc6,0x00,0x00],[0x0e,0x1b,0x18,0x3c,0x18,0xd8,0x70,0x00],
+  [0x18,0x30,0x78,0x0c,0x7c,0xcc,0x76,0x00],[0x0c,0x18,0x00,0x38,0x18,0x18,0x3c,0x00],
+  [0x0c,0x18,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],[0x18,0x30,0xcc,0xcc,0xcc,0xcc,0x76,0x00],
+  [0x76,0xdc,0x00,0xdc,0x66,0x66,0x66,0x00],[0x76,0xdc,0x00,0xe6,0xf6,0xde,0xce,0x00],
+  [0x3c,0x6c,0x6c,0x3e,0x00,0x7e,0x00,0x00],[0x38,0x6c,0x6c,0x38,0x00,0x7c,0x00,0x00],
+  [0x18,0x00,0x18,0x18,0x30,0x63,0x3e,0x00],[0x7e,0x81,0xb9,0xa5,0xb9,0xa5,0x81,0x7e],
+  [0x00,0x00,0x00,0xfe,0x06,0x06,0x00,0x00],[0x63,0xe6,0x6c,0x7e,0x33,0x66,0xcc,0x0f],
+  [0x63,0xe6,0x6c,0x7a,0x36,0x6a,0xdf,0x06],[0x18,0x00,0x18,0x18,0x3c,0x3c,0x18,0x00],
+  [0x00,0x33,0x66,0xcc,0x66,0x33,0x00,0x00],[0x00,0xcc,0x66,0x33,0x66,0xcc,0x00,0x00],
+  [0x22,0x88,0x22,0x88,0x22,0x88,0x22,0x88],[0x55,0xaa,0x55,0xaa,0x55,0xaa,0x55,0xaa],
+  [0x77,0xdd,0x77,0xdd,0x77,0xdd,0x77,0xdd],[0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x18],
+  [0x18,0x18,0x18,0x18,0xf8,0x18,0x18,0x18],[0x30,0x60,0x38,0x6c,0xc6,0xfe,0xc6,0x00],
+  [0x7c,0x82,0x38,0x6c,0xc6,0xfe,0xc6,0x00],[0x18,0x0c,0x38,0x6c,0xc6,0xfe,0xc6,0x00],
+  [0x7e,0x81,0x9d,0xa1,0xa1,0x9d,0x81,0x7e],[0x36,0x36,0xf6,0x06,0xf6,0x36,0x36,0x36],
+  [0x36,0x36,0x36,0x36,0x36,0x36,0x36,0x36],[0x00,0x00,0xfe,0x06,0xf6,0x36,0x36,0x36],
+  [0x36,0x36,0xf6,0x06,0xfe,0x00,0x00,0x00],[0x18,0x18,0x7e,0xc0,0xc0,0x7e,0x18,0x18],
+  [0x66,0x66,0x3c,0x7e,0x18,0x7e,0x18,0x18],[0x00,0x00,0x00,0x00,0xf8,0x18,0x18,0x18],
+  [0x18,0x18,0x18,0x18,0x1f,0x00,0x00,0x00],[0x18,0x18,0x18,0x18,0xff,0x00,0x00,0x00],
+  [0x00,0x00,0x00,0x00,0xff,0x18,0x18,0x18],[0x18,0x18,0x18,0x18,0x1f,0x18,0x18,0x18],
+  [0x00,0x00,0x00,0x00,0xff,0x00,0x00,0x00],[0x18,0x18,0x18,0x18,0xff,0x18,0x18,0x18],
+  [0x76,0xdc,0x7c,0x06,0x7e,0xc6,0x7e,0x00],[0x76,0xdc,0x38,0x6c,0xc6,0xfe,0xc6,0x00],
+  [0x36,0x36,0x37,0x30,0x3f,0x00,0x00,0x00],[0x00,0x00,0x3f,0x30,0x37,0x36,0x36,0x36],
+  [0x36,0x36,0xf7,0x00,0xff,0x00,0x00,0x00],[0x00,0x00,0xff,0x00,0xf7,0x36,0x36,0x36],
+  [0x36,0x36,0x37,0x30,0x37,0x36,0x36,0x36],[0x00,0x00,0xff,0x00,0xff,0x00,0x00,0x00],
+  [0x36,0x36,0xf7,0x00,0xf7,0x36,0x36,0x36],[0x00,0xc6,0x7c,0xc6,0xc6,0x7c,0xc6,0x00],
+  [0x30,0x7e,0x0c,0x7c,0xcc,0xcc,0x78,0x00],[0xf8,0x6c,0x66,0xf6,0x66,0x6c,0xf8,0x00],
+  [0x7c,0x82,0xfe,0xc0,0xfc,0xc0,0xfe,0x00],[0xc6,0x00,0xfe,0xc0,0xfc,0xc0,0xfe,0x00],
+  [0x30,0x18,0xfe,0xc0,0xfc,0xc0,0xfe,0x00],[0x00,0x00,0x38,0x18,0x18,0x18,0x3c,0x00],
+  [0x0c,0x18,0x3c,0x18,0x18,0x18,0x3c,0x00],[0x3c,0x42,0x3c,0x18,0x18,0x18,0x3c,0x00],
+  [0x66,0x00,0x3c,0x18,0x18,0x18,0x3c,0x00],[0x18,0x18,0x18,0x18,0xf8,0x00,0x00,0x00],
+  [0x00,0x00,0x00,0x00,0x1f,0x18,0x18,0x18],[0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff],
+  [0x00,0x00,0x00,0x00,0xff,0xff,0xff,0xff],[0x18,0x18,0x18,0x00,0x00,0x18,0x18,0x18],
+  [0x30,0x18,0x3c,0x18,0x18,0x18,0x3c,0x00],[0xff,0xff,0xff,0xff,0x00,0x00,0x00,0x00],
+  [0x30,0x60,0x38,0x6c,0xc6,0x6c,0x38,0x00],[0x78,0xcc,0xcc,0xd8,0xcc,0xc6,0xcc,0x00],
+  [0x7c,0x82,0x38,0x6c,0xc6,0x6c,0x38,0x00],[0x0c,0x06,0x38,0x6c,0xc6,0x6c,0x38,0x00],
+  [0x76,0xdc,0x7c,0xc6,0xc6,0xc6,0x7c,0x00],[0x76,0xdc,0x38,0x6c,0xc6,0x6c,0x38,0x00],
+  [0x00,0x00,0x66,0x66,0x66,0x66,0x7c,0xc0],[0xe0,0x60,0x7c,0x66,0x66,0x7c,0x60,0xf0],
+  [0xf0,0x60,0x7c,0x66,0x7c,0x60,0xf0,0x00],[0x18,0x30,0xc6,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0x7c,0x82,0x00,0xc6,0xc6,0xc6,0x7c,0x00],[0x60,0x30,0xc6,0xc6,0xc6,0xc6,0x7c,0x00],
+  [0x18,0x30,0xc6,0xc6,0xc6,0x7e,0x06,0xfc],[0x0c,0x18,0x66,0x66,0x3c,0x18,0x3c,0x00],
+  [0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00],[0x0c,0x18,0x30,0x00,0x00,0x00,0x00,0x00],
+  [0x00,0x00,0x00,0x7e,0x00,0x00,0x00,0x00],[0x18,0x18,0x7e,0x18,0x18,0x00,0x7e,0x00],
+  [0x00,0x00,0x00,0x00,0x00,0xff,0x00,0xff],[0xe1,0x32,0xe4,0x3a,0xf6,0x2a,0x5f,0x86],
+  [0x7f,0xdb,0xdb,0x7b,0x1b,0x1b,0x1b,0x00],[0x3e,0x61,0x3c,0x66,0x66,0x3c,0x86,0x7c],
+  [0x00,0x18,0x00,0x7e,0x00,0x18,0x00,0x00],[0x00,0x00,0x00,0x00,0x00,0x18,0x0c,0x38],
+  [0x38,0x6c,0x6c,0x38,0x00,0x00,0x00,0x00],[0x00,0xc6,0x00,0x00,0x00,0x00,0x00,0x00],
+  [0x00,0x00,0x00,0x18,0x00,0x00,0x00,0x00],[0x18,0x38,0x18,0x18,0x3c,0x00,0x00,0x00],
+  [0x78,0x0c,0x38,0x0c,0x78,0x00,0x00,0x00],[0x78,0x0c,0x18,0x30,0x7c,0x00,0x00,0x00],
+  [0x00,0x00,0x3c,0x3c,0x3c,0x3c,0x00,0x00],[0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00],
+];
+
+const CP850_NAMES = {
+  128:'Ç',129:'ü',130:'é',131:'â',132:'ä',133:'à',134:'å',135:'ç',
+  136:'ê',137:'ë',138:'è',139:'ï',140:'î',141:'ì',142:'Ä',143:'Å',
+  144:'É',145:'æ',146:'Æ',147:'ô',148:'ö',149:'ò',150:'û',151:'ù',
+  152:'ÿ',153:'Ö',154:'Ü',155:'ø',156:'£',157:'Ø',158:'×',159:'ƒ',
+  160:'á',161:'í',162:'ó',163:'ú',164:'ñ',165:'Ñ',166:'ª',167:'º',
+  168:'¿',169:'®',170:'¬',171:'½',172:'¼',173:'¡',174:'«',175:'»',
+  176:'░',177:'▒',178:'▓',179:'│',180:'┤',181:'Á',182:'Â',183:'À',
+  184:'©',185:'╣',186:'║',187:'╗',188:'╝',189:'¢',190:'¥',191:'┐',
+  192:'└',193:'┴',194:'┬',195:'├',196:'─',197:'┼',198:'ã',199:'Ã',
+  200:'╚',201:'╔',202:'╩',203:'╦',204:'╠',205:'═',206:'╬',207:'¤',
+  208:'ð',209:'Ð',210:'Ê',211:'Ë',212:'È',213:'ı',214:'Í',215:'Î',
+  216:'Ï',217:'┘',218:'┌',219:'█',220:'▄',221:'¦',222:'Ì',223:'▀',
+  224:'Ó',225:'ß',226:'Ô',227:'Ò',228:'õ',229:'Õ',230:'µ',231:'þ',
+  232:'Þ',233:'Ú',234:'Û',235:'Ù',236:'ý',237:'Ý',238:'¯',239:'´',
+  240:'─',241:'±',242:'‗',243:'¾',244:'¶',245:'§',246:'÷',247:'¸',
+  248:'°',249:'¨',250:'·',251:'¹',252:'³',253:'²',254:'■',255:' ',
+};
+
+// MODE = '8x8' | '8x16' | '16x16'
+let MODE = '8x8';
+let charPage = 0;
+
+// Trois banques indépendantes
+const font8x8  = {};
+const font8x16 = {};
+const font16x16= {};
+for (const c of CHARS) {
+  const code = c.charCodeAt(0);
+  font8x8[c]   = DEFAULT_FONT8[code] ? [...DEFAULT_FONT8[code]] : new Array(8).fill(0);
+  font8x16[c]  = new Array(16).fill(0);
+  font16x16[c] = new Array(32).fill(0); // 16 unsigned ints stockés en 2 bytes each hi/lo
+}
+
+let font     = font8x8;
+let current  = 'A';
+let isDrawing= false;
+let drawVal  = null;
+
+// ─── Dimensions par mode ──────────────────────────────────
+function modeW()  { return MODE==='16x16' ? 16 : 8; }
+function modeH()  { return MODE==='8x16'  ? 16 : (MODE==='16x16' ? 16 : 8); }
+function modeBytes(){ return MODE==='8x8' ? 8 : (MODE==='8x16' ? 16 : 32); }
+
+// ═══════════════════════════════════════════════════════════
+// GESTION DU MODE
+// ═══════════════════════════════════════════════════════════
+
+function setMode(m) {
+  MODE = m;
+  font = m==='8x8' ? font8x8 : m==='8x16' ? font8x16 : font16x16;
+  ['8x8','8x16','16x16'].forEach(id => {
+    document.getElementById('tab-'+id).classList.toggle('active', id===m);
+  });
+  document.getElementById('status-right').textContent = `Font Editor — ${m}`;
+  document.title = `Font Editor — f1_.c [${m}]`;
+  document.body.className = 'mode-'+m;
+  rebuildAll(); updateAll();
+}
+
+function setCharPage(p) {
+  charPage = p;
+  document.getElementById('btn-page0').classList.toggle('active', p===0);
+  document.getElementById('btn-page1').classList.toggle('active', p===1);
+  buildCharGrid(); updateCharGrid();
+}
+
+// ═══════════════════════════════════════════════════════════
+// CONSTRUCTION UI
+// ═══════════════════════════════════════════════════════════
+
+function rebuildAll() { buildColLabels(); buildGrid(); buildCharGrid(); }
+
+function buildColLabels() {
+  const wrap = document.getElementById('col-labels');
+  wrap.innerHTML = '';
+  wrap.appendChild(Object.assign(document.createElement('div'),{className:'col-lbl-spacer'}));
+  const W = modeW();
+  for (let i=0; i<W; i++) {
+    const s = Object.assign(document.createElement('span'),{
+      textContent: i<10 ? i : String.fromCharCode(55+i)
+    });
+    const cellPx = MODE==='8x8' ? 44 : MODE==='8x16' ? 40 : 24;
+    s.style.cssText = `width:${cellPx}px;margin-right:3px;display:inline-block`;
+    wrap.appendChild(s);
+  }
+}
+
+function buildGrid() {
+  const gridEl = document.getElementById('grid');
+  gridEl.innerHTML = '';
+  const W=modeW(), H=modeH();
+  for (let row=0; row<H; row++) {
+    const rowDiv = document.createElement('div'); rowDiv.className='grid-row';
+    const lbl = Object.assign(document.createElement('div'),{
+      className:'row-label',
+      textContent: row<10 ? row : String.fromCharCode(55+row)
+    });
+    rowDiv.appendChild(lbl);
+    for (let col=0; col<W; col++) {
+      const cell = document.createElement('div'); cell.className='cell';
+      cell.dataset.row=row; cell.dataset.col=col;
+      cell.addEventListener('mousedown', e=>{
+        e.preventDefault(); drawVal=!getPixel(row,col);
+        setPixel(row,col,drawVal); isDrawing=true; updateAll();
+      });
+      cell.addEventListener('mouseenter', ()=>{
+        if(isDrawing){setPixel(row,col,drawVal);updateAll();}
+      });
+      rowDiv.appendChild(cell);
+    }
+    gridEl.appendChild(rowDiv);
+  }
+}
+
+function charLabel(c){
+  const code=c.charCodeAt(0);
+  if(code<0x20) return code.toString(16).toUpperCase().padStart(2,'0');
+  if(code===0x20) return '·';
+  if(code===0x7F) return '7F';
+  if(code>=128&&CP850_NAMES[code]) return CP850_NAMES[code];
+  return c;
+}
+function charTitle(c){
+  const code=c.charCodeAt(0);
+  const hex='0x'+code.toString(16).toUpperCase().padStart(2,'0');
+  if(code<0x20) return `${hex} (ctrl)`;
+  if(code===0x7F) return '0x7F (DEL)';
+  if(code>=128) return `${hex} (${CP850_NAMES[code]||'?'})`;
+  return `'${c}' (${hex})`;
+}
+
+function buildCharGrid(){
+  const gridEl=document.getElementById('char-grid'); gridEl.innerHTML='';
+  const base=charPage*128;
+  const slice=CHARS.slice(base,base+128);
+  for(const c of slice){
+    const code=c.charCodeAt(0);
+    const cell=document.createElement('div'); cell.className='char-cell';
+    cell.title=charTitle(c);
+    const lbl=charLabel(c); cell.textContent=lbl;
+    if(lbl.length>1||code<0x20||code===0x7F) cell.style.fontSize='8px';
+    cell.dataset.charCode=code;
+    cell.addEventListener('click',()=>selectChar(c));
+    gridEl.appendChild(cell);
+  }
+}
+
+document.addEventListener('mouseup',()=>{isDrawing=false;});
+
+// ═══════════════════════════════════════════════════════════
+// PIXELS
+// ═══════════════════════════════════════════════════════════
+
+function getPixel(row,col){
+  if(MODE==='8x8')  return !!(font[current][row] & (1<<(7-col)));
+  if(MODE==='8x16') return !!(font[current][row] & (1<<(7-col)));
+  // 16x16 : stocké en 32 bytes, 2 par ligne (hi=col<8, lo=col>=8)
+  const bi=row*2+(col<8?0:1);
+  return !!(font[current][bi] & (1<<(7-(col%8))));
+}
+
+function setPixel(row,col,val){
+  if(MODE==='8x8'){
+    if(val) font[current][row]|=(1<<(7-col));
+    else    font[current][row]&=~(1<<(7-col));
+  } else if(MODE==='8x16'){
+    if(val) font[current][row]|=(1<<(7-col));
+    else    font[current][row]&=~(1<<(7-col));
+  } else {
+    const bi=row*2+(col<8?0:1), bp=7-(col%8);
+    if(val) font[current][bi]|=(1<<bp);
+    else    font[current][bi]&=~(1<<bp);
+  }
+}
+
+function hasData(c){ return font[c].some(b=>b!==0); }
+
+function selectChar(c){
+  current=c;
+  const page=c.charCodeAt(0)<128?0:1;
+  if(page!==charPage) setCharPage(page);
+  updateAll();
+}
+
+// ═══════════════════════════════════════════════════════════
+// TRANSFORMATIONS
+// ═══════════════════════════════════════════════════════════
+
+function shiftUp(){
+  if(MODE==='16x16'){font[current]=[...font[current].slice(2),...font[current].slice(0,2)];}
+  else{font[current]=[...font[current].slice(1),font[current][0]];}
+  updateAll();
+}
+function shiftDown(){
+  if(MODE==='16x16'){font[current]=[...font[current].slice(-2),...font[current].slice(0,-2)];}
+  else{font[current]=[font[current][font[current].length-1],...font[current].slice(0,-1)];}
+  updateAll();
+}
+function shiftLeft(){
+  if(MODE==='8x8'||MODE==='8x16'){font[current]=font[current].map(b=>((b<<1)|(b>>7))&0xFF);}
+  else{const g=font[current];for(let r=0;r<16;r++){const w=(g[r*2]<<8)|g[r*2+1];const s=((w<<1)|(w>>15))&0xFFFF;g[r*2]=(s>>8)&0xFF;g[r*2+1]=s&0xFF;}}
+  updateAll();
+}
+function shiftRight(){
+  if(MODE==='8x8'||MODE==='8x16'){font[current]=font[current].map(b=>((b>>1)|(b<<7))&0xFF);}
+  else{const g=font[current];for(let r=0;r<16;r++){const w=(g[r*2]<<8)|g[r*2+1];const s=((w>>1)|((w&1)<<15))&0xFFFF;g[r*2]=(s>>8)&0xFF;g[r*2+1]=s&0xFF;}}
+  updateAll();
+}
+function flipH(){
+  if(MODE==='8x8'||MODE==='8x16'){font[current]=font[current].map(b=>{let r=0;for(let i=0;i<8;i++)if(b&(1<<i))r|=(1<<(7-i));return r;});}
+  else{const g=font[current];for(let r=0;r<16;r++){let hi=0,lo=0;for(let i=0;i<8;i++){if(g[r*2+1]&(1<<i))hi|=(1<<(7-i));if(g[r*2]&(1<<i))lo|=(1<<(7-i));}g[r*2]=hi;g[r*2+1]=lo;}}
+  updateAll();
+}
+function flipV(){
+  if(MODE==='8x8'||MODE==='8x16'){font[current]=[...font[current]].reverse();}
+  else{const g=font[current];const rows=[];for(let r=0;r<16;r++)rows.push([g[r*2],g[r*2+1]]);rows.reverse();for(let r=0;r<16;r++){g[r*2]=rows[r][0];g[r*2+1]=rows[r][1];}}
+  updateAll();
+}
+function invert(){ font[current]=font[current].map(b=>(~b)&0xFF); updateAll(); }
+function clearGlyph(){ font[current]=new Array(modeBytes()).fill(0); updateAll(); }
+
+// ═══════════════════════════════════════════════════════════
+// MISE À JOUR UI
+// ═══════════════════════════════════════════════════════════
+
+function updateAll(){
+  updateGridDisplay(); updateCharInfo(); updateCharGrid();
+  updatePreviews(); updateBytesDisplay(); updateStringPreview();
+  updateCodeOutput(); updateStats();
+}
+
+function updateGridDisplay(){
+  document.querySelectorAll('.cell').forEach(cell=>
+    cell.classList.toggle('on', getPixel(+cell.dataset.row,+cell.dataset.col)));
+}
+
+function updateCharInfo(){
+  const code=current.charCodeAt(0);
+  document.getElementById('char-badge').textContent=
+    code<0x20||code===0x7F?charLabel(current):current===' '?'·':code>=128?(CP850_NAMES[code]||'?'):current;
+  document.getElementById('char-name').textContent=getCharName(current);
+  document.getElementById('char-code').textContent=
+    `CP850 0x${code.toString(16).toUpperCase().padStart(2,'0')} — index ${code} (dec)`;
+}
+
+function getCharName(c){
+  const code=c.charCodeAt(0);
+  const CTRL=['NUL','SOH','STX','ETX','EOT','ENQ','ACK','BEL',
+              'BS','HT','LF','VT','FF','CR','SO','SI',
+              'DLE','DC1','DC2','DC3','DC4','NAK','SYN','ETB',
+              'CAN','EM','SUB','ESC','FS','GS','RS','US'];
+  if(code<0x20) return `Ctrl (${CTRL[code]})`;
+  if(c===' ') return 'Espace (0x20)';
+  if(code===0x7F) return 'DEL (0x7F)';
+  if(code>=65&&code<=90) return `Majuscule '${c}'`;
+  if(code>=97&&code<=122) return `Minuscule '${c}'`;
+  if(code>=48&&code<=57) return `Chiffre '${c}'`;
+  if(code>=128) return `CP850 ${CP850_NAMES[code]||'?'} (0x${code.toString(16).toUpperCase().padStart(2,'0')})`;
+  return `Symbole '${c}'`;
+}
+
+function updateCharGrid(){
+  document.querySelectorAll('.char-cell').forEach(cell=>{
+    const c=String.fromCharCode(parseInt(cell.dataset.charCode));
+    cell.className='char-cell';
+    if(c===current) cell.classList.add('active');
+    if(hasData(c))  cell.classList.add('has-data');
+  });
+}
+
+function drawGlyphToCanvas(canvas,glyph,W,H,scale){
+  canvas.width=W*scale; canvas.height=H*scale;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#fff';
+  for(let r=0;r<H;r++) for(let c2=0;c2<W;c2++){
+    let on;
+    if(MODE==='8x8'||MODE==='8x16'){ on=!!(glyph[r]&(1<<(7-c2))); }
+    else{ const bi=r*2+(c2<8?0:1); on=!!(glyph[bi]&(1<<(7-(c2%8)))); }
+    if(on) ctx.fillRect(c2*scale,r*scale,scale,scale);
+  }
+}
+
+function updatePreviews(){
+  const g=font[current]; const W=modeW(), H=modeH();
+  [[1,'prev1'],[2,'prev2'],[4,'prev4'],[6,'prev6']].forEach(([s,id])=>{
+    const cv=document.getElementById(id);
+    drawGlyphToCanvas(cv,g,W,H,s);
+    cv.style.width=(W*s)+'px'; cv.style.height=(H*s)+'px';
+  });
+}
+
+function updateBytesDisplay(){
+  const g=font[current]; const wrap=document.getElementById('bytes-display');
+  wrap.innerHTML='';
+  const H=modeH();
+  if(MODE==='8x8'||MODE==='8x16'){
+    g.slice(0,H).forEach((b,i)=>{
+      const row=document.createElement('div'); row.className='byte-row';
+      row.appendChild(el('div','byte-idx',i));
+      row.appendChild(el('div','byte-hex','0x'+b.toString(16).toUpperCase().padStart(2,'0')));
+      row.appendChild(makeBits(b,8)); wrap.appendChild(row);
+    });
+  } else {
+    for(let r=0;r<16;r++){
+      const hi=g[r*2]||0, lo=g[r*2+1]||0;
+      const row=document.createElement('div'); row.className='byte-row';
+      row.appendChild(el('div','byte-idx',r));
+      const hexDiv=document.createElement('div'); hexDiv.className='byte-hex';
+      hexDiv.style.minWidth='90px';
+      hexDiv.textContent='0x'+hi.toString(16).toUpperCase().padStart(2,'0')+
+                         ' 0x'+lo.toString(16).toUpperCase().padStart(2,'0');
+      row.appendChild(hexDiv);
+      const sep=document.createElement('div'); sep.style.cssText='width:4px;flex-shrink:0';
+      row.appendChild(makeBits(hi,8)); row.appendChild(sep); row.appendChild(makeBits(lo,8));
+      wrap.appendChild(row);
+    }
+  }
+}
+
+function el(tag,cls,txt){const d=document.createElement('div');d.className=cls;if(txt!==undefined)d.textContent=txt;return d;}
+function makeBits(b,n){const w=document.createElement('div');w.className='byte-bits';for(let bit=n-1;bit>=0;bit--){const d=document.createElement('div');d.className='bit'+(b&(1<<bit)?' on':'');w.appendChild(d);}return w;}
+
+function updateStringPreview(){
+  const str=document.getElementById('preview-input').value||'DEMO';
+  renderStringToCanvas(document.getElementById('string-preview'),str,1);
+}
+
+function renderStringToCanvas(canvas,str,scale){
+  const chars=[...str];
+  const W=modeW(), H=modeH();
+  const cw=Math.max(chars.length*W*scale,W);
+  canvas.width=cw; canvas.height=H*scale;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,cw,H*scale);
+  ctx.fillStyle='#fff';
+  chars.forEach((c,ci)=>{
+    const g=font[c]||new Array(modeBytes()).fill(0);
+    for(let r=0;r<H;r++) for(let col=0;col<W;col++){
+      let on;
+      if(MODE==='8x8'||MODE==='8x16'){ on=!!(g[r]&(1<<(7-col))); }
+      else{ const bi=r*2+(col<8?0:1); on=!!(g[bi]&(1<<(7-(col%8)))); }
+      if(on) ctx.fillRect(ci*W*scale+col*scale,r*scale,scale,scale);
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// GÉNÉRATION CODE C — FORMAT f1_.c
+// ═══════════════════════════════════════════════════════════
+
+function hex8(b){ return '0x'+b.toString(16).padStart(2,'0'); }
+function hex16(w){ return '0x'+w.toString(16).toUpperCase().padStart(4,'0'); }
+
+// Literal C pour le caractère (comme dans f1_.c)
+// Retourne le numéro décimal du code pour les codes non-ASCII (>127 ou <32 sauf quelques-uns)
+// ou le caractère littéral pour les printables ASCII simples
+function cCharLit(c){
+  const code = c.charCodeAt(0);
+  if(code >= 128) return String(code);           // numérique
+  if(code < 0x20) return String(code);           // numérique
+  if(code === 0x7F) return String(code);         // numérique
+  if(c === "'")  return "'\\''" ;
+  if(c === "\\") return "'\\\\'";
+  return "'" + c + "'";
+}
+
+// Label du commentaire (symbole CP850 ou char)
+function charSymbol(c){
+  const code=c.charCodeAt(0);
+  if(code>=128&&CP850_NAMES[code]) return CP850_NAMES[code];
+  if(code<0x20) return '∅';
+  if(code===0x7F) return '⌂';
+  if(code===0x20) return ' ';
+  return c;
+}
+
+function generateCode(chars, withHeader=true){
+  const lines=[];
+  if(MODE==='8x8'){
+    if(withHeader){lines.push('void _initFont1_8x8(void)');lines.push('{');}
+    for(const c of chars){
+      const code=c.charCodeAt(0);
+      const hexCode='0x'+code.toString(16).toUpperCase().padStart(2,'0');
+      const sym=charSymbol(c);
+      const bytes=font[c].map(b=>'0x'+b.toString(16).padStart(2,'0')).join(', ');
+      const numStr=String(code).padStart(4,' ');
+      lines.push(`    font1DefineChar8x8(font1Bank8x8, ${numStr}, ${bytes}); /* ${hexCode} */    /* ${sym} */`);
+    }
+    if(withHeader) lines.push('}');
+  } else if(MODE==='8x16'){
+    if(withHeader){lines.push('void _initFont1_8x16(void)');lines.push('{');}
+    for(const c of chars){
+      const code=c.charCodeAt(0);
+      const hexCode='0x'+code.toString(16).toUpperCase().padStart(2,'0');
+      const sym=charSymbol(c);
+      const bytes=font[c].slice(0,16).map(b=>'0x'+b.toString(16).padStart(2,'0')).join(', ');
+      const numStr=String(code).padStart(4,' ');
+      lines.push(`    font1DefineChar8x16(font1Bank8x16, ${numStr}, ${bytes}); /* ${hexCode} */    /* ${sym} */`);
+    }
+    if(withHeader) lines.push('}');
+  } else {
+    // 16x16 — format avec r[] comme dans f1_.c
+    if(withHeader){
+      lines.push('void _initFont1_16x16(void)');
+      lines.push('{');
+      lines.push('    static unsigned int r[16];');
+    }
+    for(const c of chars){
+      const code=c.charCodeAt(0);
+      const sym=charSymbol(c);
+      const label=code>=128?(CP850_NAMES[code]||'?'):code<0x20?`0x${code.toString(16).toUpperCase().padStart(2,'0')}`:c===' '?'Espace':code===0x7F?'0x7F':c;
+      lines.push('');
+      lines.push(`    /* --- ${label} --- */`);
+      const g=font[c];
+      // 4 entrées par ligne
+      for(let row=0;row<16;row++){
+        const hi=g[row*2]||0, lo=g[row*2+1]||0;
+        const w=((hi<<8)|lo)&0xFFFF;
+        const idx=row<10?` ${row}`:String(row);
+        const entry=`r[${idx}]=${hex16(w)};`;
+        if(row%4===0) lines.push('    '+entry);
+        else lines[lines.length-1]+=' '+entry;
+      }
+      lines.push(`    font1DefineChar16x16(font1Bank16x16, ${cCharLit(c)}, r);  /* ${sym} */`);
+    }
+    if(withHeader) lines.push('}');
+  }
+  return lines.join('\n');
+}
+
+function generateCodeHTML(chars){
+  const code=generateCode(chars);
+  const e=code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return e
+    .replace(/\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\//g,m=>`<span class="code-cm">${m}</span>`)
+    .replace(/\b(void|return|static|unsigned|int)\b/g,m=>`<span class="code-kw">${m}</span>`)
+    .replace(/\b(_initFont1_8x8|_initFont1_8x16|_initFont1_16x16|font1DefineChar8x8|font1DefineChar8x16|font1DefineChar16x16)\b/g,m=>`<span class="code-fn">${m}</span>`)
+    .replace(/\b(font1Bank8x8|font1Bank8x16|font1Bank16x16)\b/g,m=>`<span class="code-str">${m}</span>`)
+    .replace(/0x[0-9A-Fa-f]+/g,m=>`<span class="code-num">${m}</span>`)
+    .replace(/'(?:\\.|[^'\\])'/g,m=>`<span class="code-str">${m}</span>`);
+}
+
+function updateCodeOutput(){
+  const defined=CHARS.filter(c=>hasData(c));
+  const out=document.getElementById('code-output');
+  out.innerHTML=defined.length?generateCodeHTML(defined):'<span style="color:var(--dim)">// Aucun glyphe défini</span>';
+}
+
+function updateStats(){
+  const defined=CHARS.filter(c=>hasData(c)).length;
+  const total=CHARS.length;
+  const bpg=modeBytes();
+  document.getElementById('stats').innerHTML=
+    `Mode actif        : <strong style="color:var(--sel-light)">${MODE}</strong><br>
+     Glyphes définis   : <strong style="color:var(--green)">${defined}</strong> / ${total}<br>
+     Glyphes vides     : <strong>${total-defined}</strong><br>
+     Taille C estimée  : ~${defined*bpg*3} octets`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPORT / IMPORT
+// ═══════════════════════════════════════════════════════════
+
+function flashBtn(id){const btn=document.getElementById(id);if(!btn)return;btn.classList.add('success');setTimeout(()=>btn.classList.remove('success'),2000);}
+function setStatus(msg,color='var(--green)'){const el=document.getElementById('status-msg');el.textContent=msg;el.style.color=color;setTimeout(()=>{el.textContent='Prêt.';el.style.color='var(--dim)';},3000);}
+
+function exportC(){navigator.clipboard.writeText(generateCode(CHARS)).then(()=>{flashBtn('btn-export-all');setStatus('✓ 256 caractères copiés !');});}
+function exportGlyph(){navigator.clipboard.writeText(generateCode([current],false).trim()).then(()=>{flashBtn('btn-export-glyph');setStatus('✓ Glyphe copié !');});}
+function exportDefined(){const d=CHARS.filter(c=>hasData(c));navigator.clipboard.writeText(generateCode(d)).then(()=>{flashBtn('btn-export-defined');setStatus(`✓ ${d.length} glyphes définis copiés !`);});}
+
+function saveJSON(){
+  const data={mode:MODE,font8x8:{},font8x16:{},font16x16:{}};
+  for(const c of CHARS){data.font8x8[c]=font8x8[c];data.font8x16[c]=font8x16[c];data.font16x16[c]=font16x16[c];}
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`mafont_${MODE}.fnt`;a.click();
+  setStatus(`✓ Sauvegardé : mafont_${MODE}.fnt`);
+}
+
+function loadJSON(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.font8x8||data.font8x16||data.font16x16){
+        for(const c of CHARS){
+          if(data.font8x8&&data.font8x8[c])   font8x8[c]=data.font8x8[c].slice(0,8);
+          if(data.font8x16&&data.font8x16[c]) font8x16[c]=data.font8x16[c].slice(0,16);
+          if(data.font16x16&&data.font16x16[c]) font16x16[c]=data.font16x16[c].slice(0,32);
+        }
+        if(data.mode) setMode(data.mode);
+      } else {
+        // ancien format (font8)
+        for(const c of CHARS)if(data[c])font8x8[c]=data[c].slice(0,8);
+        setMode('8x8');
+      }
+      updateAll();setStatus(`✓ Chargé : ${file.name}`);
+    }catch(err){setStatus('✗ Erreur de lecture JSON','var(--red)');}
+  };
+  reader.readAsText(file);
+}
+
+function importFromTextarea(){
+  try{
+    const data=JSON.parse(document.getElementById('json-io').value);
+    if(data.font8x8||data.font8x16||data.font16x16){
+      for(const c of CHARS){
+        if(data.font8x8&&data.font8x8[c])   font8x8[c]=data.font8x8[c].slice(0,8);
+        if(data.font8x16&&data.font8x16[c]) font8x16[c]=data.font8x16[c].slice(0,16);
+        if(data.font16x16&&data.font16x16[c]) font16x16[c]=data.font16x16[c].slice(0,32);
+      }
+      if(data.mode) setMode(data.mode);
+    } else {
+      for(const c of CHARS)if(data[c])font[c]=data[c].slice(0,modeBytes());
+    }
+    updateAll();setStatus('✓ Police importée');
+  }catch(e){setStatus('✗ JSON invalide','var(--red)');}
+}
+
+function applyHex(){
+  const parts=document.getElementById('hex-input').value.trim().split(/[\s,]+/).filter(Boolean);
+  const expected=modeBytes();
+  if(parts.length!==expected){setStatus(`✗ Entrez exactement ${expected} valeurs hex`,'var(--red)');return;}
+  const bytes=parts.map(p=>parseInt(p,16));
+  if(bytes.some(isNaN)){setStatus('✗ Valeurs hexadécimales invalides','var(--red)');return;}
+  font[current]=bytes;updateAll();setStatus('✓ Glyphe mis à jour');
+}
+
+function exportFontPng(){
+  const scale=parseInt(document.getElementById('png-export-scale').value)||2;
+  const W=modeW(), H=modeH();
+  const cols=16, rows=16;
+  const canvas=document.createElement('canvas');
+  canvas.width=cols*W*scale; canvas.height=rows*H*scale;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle='#fff';
+  CHARS.forEach((c,i)=>{
+    const col=i%cols, row=Math.floor(i/cols);
+    const ox=col*W*scale, oy=row*H*scale;
+    const g=font[c]||new Array(modeBytes()).fill(0);
+    for(let r=0;r<H;r++) for(let bc=0;bc<W;bc++){
+      let on;
+      if(MODE==='8x8'||MODE==='8x16'){on=!!(g[r]&(1<<(7-bc)));}
+      else{const bi=r*2+(bc<8?0:1);on=!!(g[bi]&(1<<(7-(bc%8))));}
+      if(on) ctx.fillRect(ox+bc*scale,oy+r*scale,scale,scale);
+    }
+  });
+  const a=document.createElement('a');a.href=canvas.toDataURL('image/png');
+  a.download=`mafont_${MODE}_x${scale}.png`;a.click();
+  setStatus(`✓ PNG exporté (${canvas.width}×${canvas.height}px)`);
+}
+
+// ═══════════════════════════════════════════════════════════
+// RACCOURCIS CLAVIER
+// ═══════════════════════════════════════════════════════════
+
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  const base=charPage*128;
+  const pageChars=CHARS.slice(base,base+128);
+  const idx=pageChars.indexOf(current);
+  if(e.key==='ArrowRight'&&idx<pageChars.length-1){selectChar(pageChars[idx+1]);return;}
+  if(e.key==='ArrowLeft' &&idx>0)                 {selectChar(pageChars[idx-1]);return;}
+  if(e.key==='ArrowDown' &&idx+16<pageChars.length){selectChar(pageChars[idx+16]);return;}
+  if(e.key==='ArrowUp'   &&idx-16>=0)             {selectChar(pageChars[idx-16]);return;}
+  if(e.key==='w'||e.key==='W'){shiftUp();return;}
+  if(e.key==='s'||e.key==='S'){shiftDown();return;}
+  if(e.key==='a'||e.key==='A'){shiftLeft();return;}
+  if(e.key==='d'||e.key==='D'){shiftRight();return;}
+  if(e.key==='h'||e.key==='H'){flipH();return;}
+  if(e.key==='v'||e.key==='V'){flipV();return;}
+  if(e.key==='i'||e.key==='I'){invert();return;}
+  if(e.key==='Delete'||e.key==='Backspace'){clearGlyph();return;}
+  if((e.ctrlKey||e.metaKey)&&e.key==='c'){e.preventDefault();exportGlyph();}
+  // Touche Tab pour changer de mode
+  if(e.key==='Tab'){
+    e.preventDefault();
+    const modes=['8x8','8x16','16x16'];
+    const idx=modes.indexOf(MODE);
+    setMode(modes[(idx+1)%3]);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+
+rebuildAll();
+updateAll();
+</script>
+</body>
+</html>
