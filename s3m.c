@@ -52,7 +52,9 @@ typedef struct {
                                     réadresser chanVolTable[c] à chaque
                                     échantillon dans mixChunk() */
     unsigned long pos;         /* position 16.16 dans l'échantillon */
-    unsigned long step;        /* pas 16.16 par échantillon de sortie */
+    unsigned long step;        /* pas 16.16 par échantillon de sortie,
+                                   recalculé à chaque tick à partir de
+                                   period (voir recomputePitch) */
     unsigned char volume;      /* 0-64, volume de la voie */
     unsigned char mixVol;      /* volume*volumeGlobal/64, recalé par tick */
     unsigned char volSlide;    /* paramètre Dxx en cours (0 = aucun) */
@@ -60,6 +62,50 @@ typedef struct {
                                    d'effet standard S3M : Dxx avec x=y=0
                                    réutilise le dernier glissement réglé) */
     int           playing;
+
+    /* --- Hauteur : période "réelle" et note de base --- */
+    unsigned int  period;        /* période courante (unité periodTable,
+                                     après décalage d'octave) ; modifiée par
+                                     Exx/Fxx/Gxx, remise à plat à chaque
+                                     déclenchement de note */
+    unsigned char baseSemitone;  /* note de base (0-11) du dernier
+                                     déclenchement, référence pour Jxy */
+    unsigned char baseOctave;    /* octave de base (0-15), idem */
+
+    /* --- Portamento par pas, Exx (bas)/Fxx (haut) --- */
+    unsigned char portaMem;      /* dernier paramètre Exx/Fxx non nul
+                                     (mémoire partagée entre les deux,
+                                     comme dans Scream Tracker 3) */
+    unsigned char portaCmd;      /* 5=E, 6=F, 0=pas de glissement normal
+                                     actif ce tick (voir doTick) */
+    unsigned int  portaStep;     /* pas de glissement normal, par tick */
+    unsigned char portaFineCmd;  /* 5/6 si un glissement fin/extra-fin est
+                                     en attente d'application (une seule
+                                     fois, voir applyFinePortamento) */
+    unsigned int  portaFineAmt;  /* montant de ce glissement fin */
+
+    /* --- Tone portamento (glissando vers une note), Gxx --- */
+    unsigned int  glideTarget;   /* période cible */
+    unsigned char glideMem;      /* dernier paramètre Gxx non nul */
+    unsigned int  glideStep;     /* pas de rapprochement vers la cible,
+                                     par tick */
+    int           glideActive;   /* 1 si Gxx présent sur cette ligne */
+
+    /* --- Vibrato, Hxy --- */
+    unsigned char vibSpeedMem;   /* dernier x (vitesse) non nul */
+    unsigned char vibDepthMem;   /* dernier y (profondeur) non nul */
+    unsigned char vibratoPos;    /* position dans la table sinus (0-31),
+                                     avance de vibSpeedMem à chaque tick */
+    int           vibratoActive; /* 1 si Hxy présent sur cette ligne */
+
+    /* --- Arpège, Jxy --- */
+    unsigned char arpX, arpY;    /* décalages en demi-tons au-dessus de la
+                                     note de base, cyclés sur 3 ticks */
+    int           arpActive;     /* 1 si Jxy présent sur cette ligne */
+
+    /* --- Offset d'échantillon, Oxx --- */
+    unsigned char offsetMem;     /* dernier paramètre Oxx non nul (unité :
+                                     256 échantillons) */
 } S3mChannel;
 
 /* ---------------------------------------------------------
@@ -88,6 +134,23 @@ static S3mChannel channels[S3M_MAX_CHANNELS];
    directement pour la fluidité de l'ensemble. */
 static int chanVolTable[S3M_MAX_CHANNELS][256];
 
+/* ---------------------------------------------------------
+   Table sinus du vibrato (Hxy), 32 pas pour un cycle complet,
+   amplitude ±127. Générée par échantillonnage direct de sin() :
+     round(127 * sin(2*PI * i / 32))  pour i = 0..31
+   Indexée par S3mChannel.vibratoPos (0-31), qui avance de
+   vibSpeedMem pas à chaque tick (voir recomputePitch plus bas).
+   Ce nombre de pas n'a pas besoin de correspondre bit pour bit
+   à Scream Tracker 3 : cette table produit un vibrato
+   sinusoïdal propre, suffisant pour l'usage de ce moteur (voir
+   s3m.h). */
+static const signed char vibratoSineTable[32] = {
+      0,  25,  49,  71,  90, 106, 117, 125,
+    127, 125, 117, 106,  90,  71,  49,  25,
+      0, -25, -49, -71, -90,-106,-117,-125,
+   -127,-125,-117,-106, -90, -71, -49, -25
+};
+
 static int numOrders       = 0;
 static int numInstruments  = 0;
 static int numPatterns     = 0;
@@ -99,6 +162,10 @@ static int s3mLoaded        = 0;
 static unsigned int currentOrder, currentRow, currentPattern;
 static unsigned int speed, tempo;
 static unsigned int tickCounter;
+static unsigned int tickInRow;    /* 0 au déclenchement de ligne (tick 0),
+                                      incrémenté à chaque tick suivant —
+                                      utilisé par l'arpège (Jxy) et le
+                                      vibrato (Hxy), voir doTick */
 static unsigned int samplesLeftInTick;
 static unsigned int samplesPerTick;
 static unsigned int globalVolume;
@@ -399,6 +466,50 @@ static int loadPattern(FILE *f, S3mPattern *pat, unsigned long paraPtr)
 }
 
 /* ---------------------------------------------------------
+   Remise à zéro complète d'une voie (silence, aucun effet actif) —
+   utilisée par s3mUnload() et par s3mLoad() pour repartir sur un
+   état propre, sans dupliquer la liste des champs à deux endroits.
+   --------------------------------------------------------- */
+static void resetChannel(S3mChannel *ch)
+{
+    ch->playing     = 0;
+    ch->sampleIdx   = -1;
+    ch->samplePtr   = NULL;
+    ch->pos         = 0;
+    ch->step        = 0;
+    ch->volume      = 0;
+    ch->mixVol      = 0;
+    ch->volSlide    = 0;
+    ch->volSlideMem = 0;
+
+    ch->period       = 0;
+    ch->baseSemitone = 0;
+    ch->baseOctave   = 0;
+
+    ch->portaMem     = 0;
+    ch->portaCmd     = 0;
+    ch->portaStep    = 0;
+    ch->portaFineCmd = 0;
+    ch->portaFineAmt = 0;
+
+    ch->glideTarget = 0;
+    ch->glideMem    = 0;
+    ch->glideStep   = 0;
+    ch->glideActive = 0;
+
+    ch->vibSpeedMem   = 0;
+    ch->vibDepthMem   = 0;
+    ch->vibratoPos    = 0;
+    ch->vibratoActive = 0;
+
+    ch->arpX      = 0;
+    ch->arpY      = 0;
+    ch->arpActive = 0;
+
+    ch->offsetMem = 0;
+}
+
+/* ---------------------------------------------------------
    Libération
    --------------------------------------------------------- */
 
@@ -428,17 +539,7 @@ void s3mUnload(void)
         if (patterns[i].data) { free(patterns[i].data); patterns[i].data = NULL; }
     }
     for (i = 0; i < S3M_MAX_CHANNELS; i++)
-    {
-        channels[i].playing   = 0;
-        channels[i].sampleIdx = -1;
-        channels[i].samplePtr = NULL;
-        channels[i].pos       = 0;
-        channels[i].step      = 0;
-        channels[i].volume    = 0;
-        channels[i].mixVol    = 0;
-        channels[i].volSlide  = 0;
-        channels[i].volSlideMem = 0;
-    }
+        resetChannel(&channels[i]);
 
     numOrders = 0;
     numInstruments = 0;
@@ -601,6 +702,7 @@ int s3mLoad(const char *filename)
     if (currentPattern >= (unsigned int)numPatterns) currentPattern = 0;
 
     tickCounter       = 0;
+    tickInRow         = 0;
     samplesLeftInTick = 0;
     samplesPerTick    = 1;
     globalVolume      = (gv > 64) ? 64 : gv;
@@ -608,17 +710,7 @@ int s3mLoad(const char *filename)
     patBreakPending   = 0;
 
     for (i = 0; i < S3M_MAX_CHANNELS; i++)
-    {
-        channels[i].playing   = 0;
-        channels[i].sampleIdx = -1;
-        channels[i].samplePtr = NULL;
-        channels[i].pos       = 0;
-        channels[i].step      = 0;
-        channels[i].volume    = 0;
-        channels[i].mixVol    = 0;
-        channels[i].volSlide  = 0;
-        channels[i].volSlideMem = 0;
-    }
+        resetChannel(&channels[i]);
 
     s3mLoaded  = 1;
     s3mPlaying = 1;
@@ -627,24 +719,54 @@ int s3mLoad(const char *filename)
 
 /* ---------------------------------------------------------
    Fréquence / pas de lecture d'une note
-   --------------------------------------------------------- */
+   ---------------------------------------------------------
+   Découpé en deux étapes réutilisables séparément :
+     computePeriod()  note (demi-ton + octave) -> période
+     stepFromPeriod() période + c2spd -> pas 16.16
+   Exx/Fxx/Gxx manipulent directement la période (S3mChannel.
+   period) sans repasser par une note ; Hxy (vibrato) et Jxy
+   (arpège) appellent stepFromPeriod()/computePeriod() à chaque
+   tick pour reconvertir la période courante, éventuellement
+   modulée, en pas de lecture (voir recomputePitch, appelée
+   depuis doTick). --------------------------------------------------------- */
 
-static unsigned long s3mNoteStep(unsigned int semitone, unsigned int octave, unsigned long c2spd)
+static const unsigned int s3mPeriodTable[12] =
+    { 1712, 1616, 1524, 1440, 1356, 1280, 1208, 1140, 1076, 1016, 960, 907 };
+
+/* Période pour une note (demi-ton 0-11, octave 0-15). Peut valoir 0
+   si l'octave est extrême (décalage total) : c'est au code appelant
+   de décider s'il s'agit d'un silence (déclenchement initial, voir
+   applyCell) ou d'un plancher à 1 (modulation en cours, voir
+   recomputePitch) — cette fonction ne tranche pas elle-même. */
+static unsigned int computePeriod(unsigned int semitone, unsigned int octave)
 {
-    static const unsigned int periodTable[12] =
-        { 1712, 1616, 1524, 1440, 1356, 1280, 1208, 1140, 1076, 1016, 960, 907 };
     unsigned long period;
+    if (semitone > 11) semitone = 11;
+    if (octave > 15) octave = 15;
+    period = (unsigned long)s3mPeriodTable[semitone] >> octave;
+    return (unsigned int)period;
+}
+
+/* Variante utilisée par l'arpège (Jxy) : ajoute 'semitoneOffset'
+   demi-tons (0-30 en pratique, deux nibbles de 0-15) à la note de
+   base, en reportant le dépassement sur l'octave — un arpège J0F
+   sur un Do peut ainsi légitimement retomber une octave plus haut. */
+static unsigned int computePeriodFromOffset(unsigned int baseSemitone,
+                                             unsigned int baseOctave,
+                                             unsigned int semitoneOffset)
+{
+    unsigned int total = baseSemitone + semitoneOffset;
+    return computePeriod(total % 12, baseOctave + total / 12);
+}
+
+static unsigned long stepFromPeriod(unsigned int period, unsigned long c2spd)
+{
     unsigned long freq;
     unsigned long step;
 
-    if (c2spd == 0) return 0;
+    if (period == 0 || c2spd == 0) return 0;
 
-    period = (unsigned long)periodTable[semitone];
-    if (octave > 15) octave = 15;
-    period >>= octave;
-    if (period == 0) return 0;
-
-    freq = (1712UL * c2spd) / (16UL * period);
+    freq = (1712UL * c2spd) / (16UL * (unsigned long)period);
     if (freq == 0) return 0;
 
     step  = (freq / mixRate) << 16;
@@ -722,29 +844,82 @@ static void applyCell(unsigned int channel,
         else if (note != 0xFF)
         {
             unsigned int octave, semitone;
-            int sIdx;
+            unsigned int targetPeriod;
 
-            if (instr != 0 && (int)instr <= numInstruments)
-                ch->sampleIdx = (int)instr - 1;
-            sIdx = ch->sampleIdx;
+            octave   = (note >> 4) & 0x0F;
+            semitone = note & 0x0F;
+            if (semitone > 11) semitone = 11;
 
-            if (sIdx >= 0 && sIdx < numInstruments && samples[sIdx].data)
+            /* Note de base mémorisée pour l'arpège (Jxy), qu'il y ait
+               ou non déclenchement immédiat du sample ci-dessous
+               (cas Gxx : la note sert de cible, pas d'attaque). */
+            ch->baseSemitone = (unsigned char)semitone;
+            ch->baseOctave   = (unsigned char)octave;
+            targetPeriod     = computePeriod(semitone, octave);
+
+            if (hasCmd && cmd == 7 && ch->playing && ch->samplePtr)
             {
-                octave   = (note >> 4) & 0x0F;
-                semitone = note & 0x0F;
-                if (semitone > 11) semitone = 11;
+                /* Gxx (tone portamento) sur une voie déjà active :
+                   la note indique la cible à atteindre par
+                   glissement — pas de retrigger, le sample déjà en
+                   cours continue de jouer sans coupure ni saut. Le
+                   glissement lui-même (vitesse, application par
+                   tick) est géré plus bas et dans doTick(). */
+                if (targetPeriod != 0) ch->glideTarget = targetPeriod;
+            }
+            else
+            {
+                int sIdx;
 
-                ch->step = s3mNoteStep(semitone, octave, samples[sIdx].c2spd);
-                if (ch->step != 0)
+                if (instr != 0 && (int)instr <= numInstruments)
+                    ch->sampleIdx = (int)instr - 1;
+                sIdx = ch->sampleIdx;
+
+                if (sIdx >= 0 && sIdx < numInstruments && samples[sIdx].data
+                    && targetPeriod != 0)
                 {
-                    ch->pos       = 0;
-                    ch->playing   = 1;
-                    ch->volume    = samples[sIdx].defVolume;
-                    /* Pointeur mis en cache ici, au déclenchement de la
-                       note : mixChunk() n'a alors plus besoin d'indexer
-                       samples[] par sampleIdx à chaque échantillon
-                       mixé (voir déclaration de S3mChannel). */
-                    ch->samplePtr = &samples[sIdx];
+                    ch->period = targetPeriod;
+                    ch->step   = stepFromPeriod(targetPeriod, samples[sIdx].c2spd);
+                    if (ch->step != 0)
+                    {
+                        ch->pos        = 0;
+                        ch->playing    = 1;
+                        ch->volume     = samples[sIdx].defVolume;
+                        ch->vibratoPos = 0;   /* phase du vibrato repartie à
+                                                  zéro à chaque nouvelle
+                                                  attaque, comme dans la
+                                                  plupart des trackers */
+                        /* Pointeur mis en cache ici, au déclenchement de la
+                           note : mixChunk() n'a alors plus besoin d'indexer
+                           samples[] par sampleIdx à chaque échantillon
+                           mixé (voir déclaration de S3mChannel). */
+                        ch->samplePtr = &samples[sIdx];
+
+                        /* Oxx (offset) : ne s'applique qu'à un déclenchement
+                           de note effectif (jamais à un Gxx, traité dans
+                           la branche ci-dessus, ni à une note sans
+                           attaque). Mémoire standard : O00 réutilise le
+                           dernier paramètre Oxx non nul. */
+                        if (hasCmd && cmd == 15)
+                        {
+                            unsigned long startPos;
+                            if (info != 0) ch->offsetMem = info;
+                            startPos = (unsigned long)ch->offsetMem * 256UL;
+                            if (startPos >= samples[sIdx].len)
+                                ch->playing = 0;   /* offset au-delà de la fin
+                                                       de l'échantillon :
+                                                       silence, comportement
+                                                       standard du format */
+                            else
+                                ch->pos = startPos << 16;
+                        }
+
+                        /* Gxx combiné à une note sur une voie qui n'était
+                           pas déjà active (première note du morceau sur
+                           cette voie, par exemple) : rien à glisser, la
+                           cible est directement la période de départ. */
+                        if (hasCmd && cmd == 7) ch->glideTarget = targetPeriod;
+                    }
                 }
             }
         }
@@ -772,6 +947,108 @@ static void applyCell(unsigned int channel,
     else
     {
         ch->volSlide = 0;
+    }
+
+    /* 5/6 = 'E'/'F', portamento par pas (descend/monte). Mémoire
+       partagée entre les deux (comme dans Scream Tracker 3) : un
+       Fxx après un Exx réutilise le paramètre d'Exx s'il vaut 0.
+       Le nibble haut du paramètre distingue trois variantes :
+         0x0-0xD : glissement normal, appliqué à chaque tick SAUF
+                   le premier (voir doTick), amount = param*4
+         0xE     : glissement FIN, un seul pas immédiat (tick 0),
+                   amount = (param&0x0F)*4
+         0xF     : glissement EXTRA-FIN, un seul pas immédiat,
+                   amount = (param&0x0F)*1
+       Les variantes fines sont appliquées par applyFinePortamento(),
+       juste après parseRow() dans doTick() — pas ici, pour rester
+       cohérent avec le traitement des glissements de volume fins
+       (DxF/DFx, voir applyFineVolSlide). */
+    if (hasCmd && (cmd == 5 || cmd == 6))
+    {
+        unsigned char p, hi;
+
+        if (info != 0) ch->portaMem = info;
+        p  = ch->portaMem;
+        hi = (unsigned char)(p >> 4);
+
+        if (hi == 0x0F)
+        {
+            ch->portaCmd     = 0;
+            ch->portaFineCmd = cmd;
+            ch->portaFineAmt = (unsigned int)(p & 0x0F);
+        }
+        else if (hi == 0x0E)
+        {
+            ch->portaCmd     = 0;
+            ch->portaFineCmd = cmd;
+            ch->portaFineAmt = (unsigned int)(p & 0x0F) * 4U;
+        }
+        else
+        {
+            ch->portaCmd     = cmd;
+            ch->portaStep    = (unsigned int)p * 4U;
+            ch->portaFineCmd = 0;
+        }
+    }
+    else
+    {
+        ch->portaCmd     = 0;
+        ch->portaFineCmd = 0;
+    }
+
+    /* 7 = 'G', tone portamento (glissando vers la note cible). Mémoire
+       de vitesse séparée de Exx/Fxx (comportement standard S3M), pas
+       de variante fine. La cible (ch->glideTarget) a déjà été mise à
+       jour plus haut si une note accompagnait ce Gxx sur cette ligne ;
+       Gxx peut aussi apparaître seul, pour continuer un glissement
+       déjà en cours vers une cible fixée sur une ligne précédente. */
+    if (hasCmd && cmd == 7)
+    {
+        if (info != 0) ch->glideMem = info;
+        ch->glideStep   = (unsigned int)ch->glideMem * 4U;
+        ch->glideActive = 1;
+    }
+    else
+    {
+        ch->glideActive = 0;
+    }
+
+    /* 8 = 'H', vibrato. x = vitesse (avance dans la table sinus par
+       tick, voir vibratoSineTable), y = profondeur. Mémoire par
+       paramètre non nul, comme les autres effets ci-dessus. La phase
+       (ch->vibratoPos) n'est PAS réinitialisée ici : un Hxy doit être
+       répété à chaque ligne pour que le vibrato continue (cohérent
+       avec Dxx/Exx/Fxx dans ce moteur), mais si on le réactive plus
+       tard, il reprend là où il en était plutôt que de sauter à zéro. */
+    if (hasCmd && cmd == 8)
+    {
+        unsigned char x = (unsigned char)((info >> 4) & 0x0F);
+        unsigned char y = (unsigned char)(info & 0x0F);
+        if (x != 0) ch->vibSpeedMem = x;
+        if (y != 0) ch->vibDepthMem = y;
+        ch->vibratoActive = 1;
+    }
+    else
+    {
+        ch->vibratoActive = 0;
+    }
+
+    /* 10 = 'J', arpège. x et y = décalages en demi-tons au-dessus de
+       la note de base (ch->baseSemitone/baseOctave), cyclés sur 3
+       ticks : tick%3==0 -> note de base, ==1 -> +x, ==2 -> +y (voir
+       recomputePitch, appelée depuis doTick). Pas de mémoire d'effet
+       ici : contrairement à Dxx/Exx/Fxx/Gxx/Hxy, un Jxy doit toujours
+       porter son propre paramètre pour être actif — c'est la
+       convention standard du format. */
+    if (hasCmd && cmd == 10)
+    {
+        ch->arpX      = (unsigned char)((info >> 4) & 0x0F);
+        ch->arpY      = (unsigned char)(info & 0x0F);
+        ch->arpActive = 1;
+    }
+    else
+    {
+        ch->arpActive = 0;
     }
 }
 
@@ -908,6 +1185,85 @@ static void applyFineVolSlide(void)
 }
 
 /* ---------------------------------------------------------
+   Portamento Exx/Fxx — application "fine"/"extra-fine" : comme
+   applyFineVolSlide() ci-dessus, un seul pas au déclenchement de la
+   ligne (tick 0), jamais répété. ch->portaFineCmd/portaFineAmt ont
+   été préparés par applyCell() ; ch->portaCmd reste à 0 pour ces
+   variantes, donc doTick() ne les réappliquera pas à chaque tick.
+   --------------------------------------------------------- */
+static void applyFinePortamento(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < (unsigned int)numChannelsToMix; i++)
+    {
+        S3mChannel *ch = &channels[i];
+
+        if (ch->portaFineCmd == 0) continue;
+
+        if (ch->portaFineCmd == 5)          /* E : descend (période monte) */
+        {
+            ch->period += ch->portaFineAmt;
+        }
+        else                                 /* F : monte (période descend) */
+        {
+            if (ch->period > ch->portaFineAmt) ch->period -= ch->portaFineAmt;
+            else                                ch->period  = 1;
+        }
+    }
+}
+
+/* ---------------------------------------------------------
+   Recalcule le pas de lecture (step) de chaque voie active à partir
+   de sa période courante, en couche par-dessus l'arpège (Jxy) et le
+   vibrato (Hxy) — appelée une fois par tick, quel que soit le
+   branchement pris dans doTick() (déclenchement de ligne ou tick
+   ordinaire), pour que ces deux effets s'appliquent dès le tick 0
+   comme dans un tracker standard (contrairement aux glissements
+   Exx/Fxx/Gxx, qui eux commencent au tick 1 — voir doTick).
+   --------------------------------------------------------- */
+static void recomputePitch(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < (unsigned int)numChannelsToMix; i++)
+    {
+        S3mChannel *ch = &channels[i];
+        unsigned int effPeriod;
+
+        if (!ch->playing || !ch->samplePtr) continue;
+
+        effPeriod = ch->period;
+
+        if (ch->arpActive)
+        {
+            unsigned int off = tickInRow % 3;
+            unsigned int semitoneOffset = (off == 1) ? ch->arpX
+                                        : (off == 2) ? ch->arpY : 0;
+            effPeriod = computePeriodFromOffset(ch->baseSemitone, ch->baseOctave,
+                                                 semitoneOffset);
+            if (effPeriod == 0) effPeriod = 1;
+        }
+
+        if (ch->vibratoActive)
+        {
+            int sineVal = vibratoSineTable[ch->vibratoPos & 0x1F];
+            /* Mise à l'échelle empirique (profondeur 0-15) : donne un
+               vibrato clairement audible sans excès aux profondeurs
+               courantes (1-8), voir s3m.h. */
+            int delta = (sineVal * (int)ch->vibDepthMem) / 32;
+            long p = (long)effPeriod + delta;
+            if (p < 1) p = 1;
+            effPeriod = (unsigned int)p;
+
+            ch->vibratoPos = (unsigned char)((ch->vibratoPos + ch->vibSpeedMem) & 0x1F);
+        }
+
+        ch->step = stepFromPeriod(effPeriod, ch->samplePtr->c2spd);
+    }
+}
+
+/* ---------------------------------------------------------
    Un "tick" du morceau (une fraction de ligne, cadencée par
    speed/tempo — voir doTick / s3mMix)
    --------------------------------------------------------- */
@@ -920,20 +1276,25 @@ static void doTick(void)
     {
         posJumpPending  = 0;
         patBreakPending = 0;
+        tickInRow       = 0;
 
         parseRow(&patterns[currentPattern], currentRow);
         if (!s3mPlaying) return;
 
-        /* Les glissements fins (DxF/DFx) s'appliquent une seule fois,
-           exactement ici, au déclenchement de la nouvelle ligne —
-           jamais sur les ticks suivants (voir applyFineVolSlide). */
+        /* Les glissements fins (DxF/DFx, ExF/EFx, ExE/EEx...) s'appliquent
+           une seule fois, exactement ici, au déclenchement de la nouvelle
+           ligne — jamais sur les ticks suivants (voir applyFineVolSlide
+           et applyFinePortamento). */
         applyFineVolSlide();
+        applyFinePortamento();
 
         advanceRow();
         tickCounter = speed;
     }
     else
     {
+        tickInRow++;
+
         for (i = 0; i < (unsigned int)numChannelsToMix; i++)
         {
             S3mChannel *ch;
@@ -959,9 +1320,52 @@ static void doTick(void)
             if (v > 64) v = 64;
             ch->volume = (unsigned char)v;
         }
+
+        /* Portamento par pas (Exx/Fxx) et tone portamento (Gxx) :
+           s'appliquent à chaque tick SAUF le premier (comportement
+           standard, identique au glissement de volume normal ci-
+           dessus) — les variantes fines ont déjà été traitées une
+           fois au tick 0 par applyFinePortamento() et laissent
+           ch->portaCmd à 0, donc ne sont pas rejouées ici. */
+        for (i = 0; i < (unsigned int)numChannelsToMix; i++)
+        {
+            S3mChannel *ch = &channels[i];
+
+            if (ch->portaCmd == 5)               /* E : descend (période monte) */
+            {
+                ch->period += ch->portaStep;
+            }
+            else if (ch->portaCmd == 6)           /* F : monte (période descend) */
+            {
+                if (ch->period > ch->portaStep) ch->period -= ch->portaStep;
+                else                              ch->period  = 1;
+            }
+
+            if (ch->glideActive)
+            {
+                if (ch->period < ch->glideTarget)
+                {
+                    ch->period += ch->glideStep;
+                    if (ch->period > ch->glideTarget) ch->period = ch->glideTarget;
+                }
+                else if (ch->period > ch->glideTarget)
+                {
+                    if (ch->period - ch->glideTarget > ch->glideStep)
+                        ch->period -= ch->glideStep;
+                    else
+                        ch->period = ch->glideTarget;
+                }
+            }
+        }
     }
 
     if (tickCounter > 0) tickCounter--;
+
+    /* Recalcule le pas de lecture de chaque voie à partir de sa
+       période courante (modifiée ci-dessus par Exx/Fxx/Gxx), en y
+       superposant l'arpège et le vibrato — une fois par tick, que ce
+       tick soit un déclenchement de ligne ou non (voir recomputePitch). */
+    recomputePitch();
 
     /* Avance du fondu (fade-in/fade-out), en échantillons de sortie
        réels plutôt qu'en ticks : une durée de fondu demandée en

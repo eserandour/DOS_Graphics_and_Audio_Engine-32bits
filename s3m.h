@@ -17,20 +17,40 @@
      - Volume global initial (Gv) et volume maître (Mv) lus
        depuis l'en-tête, fidèles au fichier plutôt que forcés
        à un maximum arbitraire (voir application dans s3m.c).
-     - Commandes : Axx (vitesse), Txx (tempo), Bxx (saut de
-       position), Cxx (rupture de motif, paramètre décodé en
-       BCD conformément au format S3M réel), Dxx (glissement
-       de volume, avec mémoire d'effet et glissements fins
-       DxF/DFx appliqués une seule fois), Vxx (volume global),
-       colonne de volume.
-     - Toutes les autres commandes (portamento, vibrato,
-       arpège, offset...) sont ignorées : la note se
-       déclenche quand même, seul l'effet fin est absent.
+     - Commandes :
+         Axx vitesse, Txx tempo, Bxx saut de position,
+         Cxx rupture de motif (paramètre décodé en BCD,
+             conformément au format S3M réel),
+         Dxx glissement de volume (mémoire d'effet, glissements
+             fins DxF/DFx appliqués une seule fois),
+         Vxx volume global, colonne de volume,
+         Exx/Fxx portamento par pas — descend/monte (mémoire
+             partagée entre les deux, variantes fines ExE/EEx
+             et extra-fines ExF/EFx appliquées une seule fois
+             au déclenchement de la ligne),
+         Gxx tone portamento — glissando vers une note cible
+             sans retrigger du sample,
+         Hxy vibrato — sinusoïdal, phase remise à zéro à
+             chaque nouvelle attaque de note,
+         Jxy arpège — cycle base/note+x/note+y sur 3 ticks,
+         Oxx offset — démarre la lecture à l'échantillon
+             xx*256 au lieu de 0 (uniquement combiné à une
+             note qui déclenche réellement le sample).
+     - Toutes les autres commandes (tremolo, tremor, retrig,
+       panning...) sont ignorées : la note se déclenche quand
+       même, seul l'effet fin est absent.
      - Bouclage automatique : à la fin de la table d'ordres,
        la lecture reprend au premier ordre valide — adapté
        à une musique de fond de démo qui tourne en boucle.
        Chaque bouclage peut être détecté depuis l'extérieur
        (voir s3mConsumeLoopFlag ci-dessous).
+
+   FIDÉLITÉ DU VIBRATO (Hxy) : la table sinus utilisée (32 pas,
+   voir vibratoSineTable dans s3m.c) et l'échelle de profondeur
+   sont une approximation raisonnable, pas une reproduction
+   bit-exacte de Scream Tracker 3 — largement suffisant pour un
+   usage de démo, mais à garder en tête si vous comparez à la
+   sortie d'un autre lecteur S3M sur le même fichier.
    ========================================================= */
 
 /* ---------------------------------------------------------

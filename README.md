@@ -5,12 +5,12 @@ Moteur graphique et audio pour **DOS**, écrit en C ANSI avec **Open Watcom 1.9*
 Accès direct au matériel PC (VRAM, PIT, clavier, DMA/DSP), sans dépendance à une bibliothèque graphique ou audio tierce. Une playlist de 9 scènes de démonstration (`scenes/`) illustre l'ensemble des modules : palette, polices bitmap, primitives 2D, rotozoom, musique tracker S3M...
 
 <p align="center">
-  <img src="CAPTURES/demo_009.png" width="45%" alt="Hello World">
-  <img src="CAPTURES/demo_006.png" width="45%" alt="Police bitmap 8x16">
-</p>
-<p align="center">
   <img src="CAPTURES/demo_012.png" width="45%" alt="Tunnel de cercles concentriques">
   <img src="CAPTURES/demo_015.png" width="45%" alt="Polygones remplis en rebond">
+</p>
+<p align="center">
+  <img src="CAPTURES/demo_007.png" width="45%" alt="Police bitmap 16x16">
+  <img src="CAPTURES/demo_000.png" width="45%" alt="Écran d'intro">
 </p>
 
 ---
@@ -41,7 +41,7 @@ Accès direct au matériel PC (VRAM, PIT, clavier, DMA/DSP), sans dépendance à
 - **Texte bitmap** — `font1` (glyphes ROM BIOS ou personnels, 8×8/8×16/16×16, accents français CP850) et `font2` (rendu par feuille de sprites).
 - **Timer haute résolution** — reprogrammation du PIT à 70 Hz, avec chaînage vers l'ISR BIOS d'origine pour ne pas casser l'horloge DOS.
 - **Clavier** — détection bas niveau de la touche Échap via l'interruption 09h.
-- **Audio** — pilote Sound Blaster bas niveau (détection `BLASTER`, DSP, DMA en boucle auto-init sans clic), lecteur de modules **S3M** (vitesse, tempo, volumes, glissements) et mixeur d'effets **WAV** (8/16 bits, mono/stéréo, rééchantillonnage à la volée), mixage effectué hors interruption.
+- **Audio** — pilote Sound Blaster bas niveau (détection `BLASTER`, DSP, DMA en boucle auto-init sans clic), lecteur de modules **S3M** (vitesse, tempo, volumes, glissements, portamento, vibrato, arpège, offset) et mixeur d'effets **WAV** (8/16 bits, mono/stéréo, rééchantillonnage à la volée), mixage effectué hors interruption.
 - **Gestionnaire de scènes** — chaque scène gère son propre minutage et signale sa fin ; l'enchaînement (playlist, bouclage) est décidé par `main.c`.
 
 ## Structure du dépôt
@@ -109,7 +109,7 @@ Chaque `.h` documente en tête de fichier le format de données et les conventio
 
 - **[Open Watcom 1.9](http://www.openwatcom.org/)** (`wcc386` + `wlink`), seule chaîne de compilation testée.
 - **[DOS/32A](http://sourceforge.net/projects/dos32a/)** (`DOS32A.EXE` + `STUB32A.EXE`), à côté de `demo.exe` (ou dans le `PATH`) au lancement.
-- Un PC réel (386 ou plus) avec carte VGA, ou un émulateur DOS : [DOSBox-X](https://dosbox-x.com/).
+- Un PC réel (386 ou plus) avec carte VGA, ou un émulateur DOS : [DOSBox](https://www.dosbox.com/), [DOSBox-X](https://dosbox-x.com/), [86Box](https://86box.net/).
 - Pour le son : carte **Sound Blaster** (ou compatible) configurée via la variable d'environnement `BLASTER` (ex. `SET BLASTER=A220 I5 D1 H5 P330 T6`). En son absence, le moteur audio se désactive proprement.
 - Python 3 + Pillow, uniquement pour les scripts de `OUTILS/` (facultatif pour compiler/exécuter la démo).
 
@@ -195,7 +195,7 @@ Ordre et bouclage définis par le tableau `playlist[]` dans `main.c`.
 ## Limites connues
 
 - Mode 13h uniquement (320×200, 256 couleurs).
-- Lecteur S3M partiel : portamento, vibrato, arpège et offset ignorés (la note se déclenche quand même) ; voir l'en-tête de `s3m.h` pour la liste des commandes supportées.
+- Lecteur S3M partiel : vitesse, tempo, sauts, volume, glissements de volume, portamento (par pas et tone portamento), vibrato, arpège et offset sont supportés ; tremolo, tremor, retrig et panning sont ignorés (la note se déclenche quand même) ; voir l'en-tête de `s3m.h` pour le détail exact.
 - Jusqu'à `S3M_MAX_CHANNELS` (16) voies mixées et `WAV_MAX_VOICES` (4) effets simultanés.
 - Testé uniquement avec Open Watcom 1.9 + DOS/32A.
 
