@@ -208,3 +208,13 @@ GNU GPL v3 — voir [`LICENSE`](LICENSE).
 ## Remerciements
 
 `audios/musique.s3m` (*Starshine*) est emprunté à **Purple Motion** (Jonne Valtonen) de **Future Crew** — voir `audios/readme.txt`.
+
+## Version 16 bits
+
+Pour ceux qui souhaitent retrouver le modèle mémoire DOS classique, une **version 16 bits** du moteur est également disponible.
+
+Cette version utilise des **pointeurs FAR** ainsi que le modèle mémoire segmenté traditionnel du DOS 16 bits.
+
+👉 **[DOS Graphics and Audio Engine – 16 bits](https://github.com/eserandour/DOS_Graphics_and_Audio_Engine_16bits)**
+
+Les versions 32 bits et 16 bits sont maintenues dans deux projets distincts, afin de permettre l'utilisation du moteur aussi bien dans un **environnement 32 bits en mode protégé** que dans l'**environnement DOS classique 16 bits**.
